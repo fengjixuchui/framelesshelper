@@ -26,12 +26,6 @@
 
 #include <QWidget>
 
-QT_BEGIN_NAMESPACE
-namespace Ui {
-QT_FORWARD_DECLARE_CLASS(Widget)
-}
-QT_END_NAMESPACE
-
 #if (QT_VERSION < QT_VERSION_CHECK(5, 13, 0))
 #define Q_DISABLE_MOVE(Class) \
     Class(Class &&) = delete; \
@@ -42,23 +36,54 @@ QT_END_NAMESPACE
     Q_DISABLE_MOVE(Class)
 #endif
 
+QT_FORWARD_DECLARE_CLASS(QVBoxLayout)
+QT_FORWARD_DECLARE_CLASS(QHBoxLayout)
+QT_FORWARD_DECLARE_CLASS(QSpacerItem)
+QT_FORWARD_DECLARE_CLASS(QPushButton)
+QT_FORWARD_DECLARE_CLASS(QLabel)
+QT_FORWARD_DECLARE_CLASS(QCheckBox)
+
 class Widget : public QWidget
 {
     Q_OBJECT
     Q_DISABLE_COPY_MOVE(Widget)
 
 public:
+    enum class Win10Version : int {
+        Win10_1507 = 10240,
+        Win10_1511 = 10586,
+        Win10_1607 = 14393,
+        Win10_1703 = 15063,
+        Win10_1709 = 16299,
+        Win10_1803 = 17134,
+        Win10_1809 = 17763,
+        Win10_1903 = 18362,
+        Win10_1909 = 18363,
+        Win10_2004 = 19041,
+        Win10_20H2 = 19042,
+        Windows10 = Win10_1507
+    };
+    Q_ENUM(Win10Version)
+
     explicit Widget(QWidget *parent = nullptr);
-    ~Widget() override;
+    ~Widget() override = default;
+
+    void *rawHandle() const;
 
     bool isNormaled() const;
 
     bool shouldDrawBorder(const bool ignoreWindowState = false) const;
     bool shouldDrawThemedBorder(const bool ignoreWindowState = false) const;
+    bool shouldDrawThemedTitleBar() const;
 
-    QColor activeBorderColor() const;
-    QColor inactiveBorderColor() const;
+    static QColor activeBorderColor();
+    static QColor inactiveBorderColor();
     QColor borderColor() const;
+
+    static bool isWin10OrGreater(const Win10Version subVer = Win10Version::Windows10);
+
+public Q_SLOTS:
+    void retranslateUi();
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
@@ -70,14 +95,31 @@ protected:
     void paintEvent(QPaintEvent *event) override;
 
 private:
+    void setupUi();
+    void updateWindow();
     void updateTitleBar();
-    void initWindow();
+    void initializeOptions();
+    void setupConnections();
+    void initializeFramelessFunctions();
+    void initializeVariables();
+    void initializeWindow();
 
 private:
-    Ui::Widget *ui = nullptr;
-    bool m_bIsWin10OrGreater = false, m_bIsWin101803OrGreater = false, m_bExtendToTitleBar = false,
-         m_bShowColorDialog = false;
-    const QColor m_cDefaultActiveBorderColor = {"#707070"} /*Qt::darkGray*/;
-    const QColor m_cDefaultInactiveBorderColor = {"#aaaaaa"} /*Qt::gray*/;
-    QColor m_cThemeColor = Qt::white;
+    bool m_bIsWin10OrGreater = false, m_bCanAcrylicBeEnabled = false, m_bExtendToTitleBar = false,
+         m_bCanShowColorDialog = false;
+    QVBoxLayout *verticalLayout_3 = nullptr, *verticalLayout_2 = nullptr, *verticalLayout = nullptr;
+    QWidget *titleBarWidget = nullptr, *contentsWidget = nullptr, *controlPanelWidget = nullptr;
+    QHBoxLayout *horizontalLayout = nullptr, *horizontalLayout_2 = nullptr,
+                *horizontalLayout_3 = nullptr;
+    QSpacerItem *horizontalSpacer_7 = nullptr, *horizontalSpacer = nullptr,
+                *horizontalSpacer_2 = nullptr, *verticalSpacer_2 = nullptr,
+                *horizontalSpacer_3 = nullptr, *horizontalSpacer_4 = nullptr,
+                *verticalSpacer = nullptr, *horizontalSpacer_5 = nullptr,
+                *horizontalSpacer_6 = nullptr;
+    QPushButton *iconButton = nullptr, *minimizeButton = nullptr, *maximizeButton = nullptr,
+                *closeButton = nullptr, *moveCenterButton = nullptr;
+    QLabel *titleLabel = nullptr;
+    QCheckBox *customizeTitleBarCB = nullptr, *preserveWindowFrameCB = nullptr,
+              *blurEffectCB = nullptr, *extendToTitleBarCB = nullptr, *forceAcrylicCB = nullptr,
+              *resizableCB = nullptr;
 };

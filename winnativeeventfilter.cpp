@@ -37,6 +37,7 @@
 #include <QLibrary>
 #include <QMargins>
 #include <QScreen>
+#include <QSettings>
 #include <QWindow>
 #include <QtMath>
 #include <qt_windows.h>
@@ -57,8 +58,8 @@
 #include <qpa/qplatformwindow.h>
 #include <qpa/qplatformwindow_p.h>
 #endif
-#ifdef WNEF_LINK_SYSLIB
 #include <d2d1.h>
+#ifdef WNEF_LINK_SYSLIB
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <shellscalingapi.h>
@@ -132,6 +133,15 @@ Q_DECLARE_METATYPE(QMargins)
     }
 #endif
 
+#ifndef WNEF_RESOLVE_WINAPI2
+#define WNEF_RESOLVE_WINAPI2(libName, funcName, ordinal) \
+    if (!m_lp##funcName) { \
+        m_lp##funcName = reinterpret_cast<_WNEF_WINAPI_##funcName>( \
+            QLibrary::resolve(QString::fromUtf8(#libName), MAKEINTRESOURCEA(ordinal))); \
+        WNEF_RESOLVE_ERROR(funcName) \
+    }
+#endif
+
 #ifndef WNEF_EXECUTE_WINAPI
 #ifdef WNEF_LINK_SYSLIB
 #define WNEF_EXECUTE_WINAPI(funcName, ...) funcName(__VA_ARGS__);
@@ -154,7 +164,16 @@ Q_DECLARE_METATYPE(QMargins)
 
 namespace {
 
-using WINDOWCOMPOSITIONATTRIB = enum _WINDOWCOMPOSITIONATTRIB { WCA_ACCENT_POLICY = 19 };
+enum : WORD { DwmwaUseImmersiveDarkMode = 20, DwmwaUseImmersiveDarkModeBefore20h1 = 19 };
+
+using WINDOWCOMPOSITIONATTRIB = enum _WINDOWCOMPOSITIONATTRIB {
+    WCA_NCRENDERING_ENABLED = 1,
+    WCA_NCRENDERING_POLICY = 2,
+    WCA_ALLOW_NCPAINT = 4,
+    WCA_EXTENDED_FRAME_BOUNDS = 8,
+    WCA_ACCENT_POLICY = 19,
+    WCA_USEDARKMODECOLORS = 26
+};
 
 using WINDOWCOMPOSITIONATTRIBDATA = struct _WINDOWCOMPOSITIONATTRIBDATA
 {
@@ -180,6 +199,19 @@ using ACCENT_POLICY = struct _ACCENT_POLICY
     DWORD AnimationId;
 };
 
+using IMMERSIVE_HC_CACHE_MODE = enum _IMMERSIVE_HC_CACHE_MODE {
+    IHCM_USE_CACHED_VALUE,
+    IHCM_REFRESH
+};
+
+using PREFERRED_APP_MODE = enum _PREFERRED_APP_MODE {
+    Default,
+    AllowDark,
+    ForceDark,
+    ForceLight,
+    Max
+};
+
 bool isWin8OrGreater()
 {
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 9, 0))
@@ -195,6 +227,15 @@ bool isWin8Point1OrGreater()
     return QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows8_1;
 #else
     return QSysInfo::WindowsVersion >= QSysInfo::WV_WINDOWS8_1;
+#endif
+}
+
+bool isWin10OrGreater()
+{
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 9, 0))
+    return QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows10;
+#else
+    return QSysInfo::WindowsVersion >= QSysInfo::WV_WINDOWS10;
 #endif
 }
 
@@ -357,22 +398,6 @@ using BP_PAINTPARAMS = struct _BP_PAINTPARAMS
     CONST BLENDFUNCTION *pBlendFunction;
 };
 
-using D2D1_FACTORY_TYPE = enum _D2D1_FACTORY_TYPE { D2D1_FACTORY_TYPE_SINGLE_THREADED = 0 };
-
-using D2D1_DEBUG_LEVEL = enum _D2D1_DEBUG_LEVEL {
-    D2D1_DEBUG_LEVEL_NONE = 0,
-    D2D1_DEBUG_LEVEL_ERROR = 1,
-    D2D1_DEBUG_LEVEL_WARNING = 2,
-    D2D1_DEBUG_LEVEL_INFORMATION = 3,
-    D2D1_DEBUG_LEVEL_FORCE_DWORD = 0xffffffff
-
-};
-
-using D2D1_FACTORY_OPTIONS = struct _D2D1_FACTORY_OPTIONS
-{
-    D2D1_DEBUG_LEVEL debugLevel;
-};
-
 using DWM_BLURBEHIND = struct _DWM_BLURBEHIND
 {
     DWORD dwFlags;
@@ -393,6 +418,15 @@ using WNEF_CORE_DATA = struct _WNEF_CORE_DATA
     // load them dynamically unconditionally.
     WNEF_GENERATE_WINAPI(GetWindowCompositionAttribute, BOOL, HWND, WINDOWCOMPOSITIONATTRIBDATA *)
     WNEF_GENERATE_WINAPI(SetWindowCompositionAttribute, BOOL, HWND, WINDOWCOMPOSITIONATTRIBDATA *)
+    WNEF_GENERATE_WINAPI(ShouldAppsUseDarkMode, BOOL)
+    WNEF_GENERATE_WINAPI(AllowDarkModeForWindow, BOOL, HWND, BOOL)
+    WNEF_GENERATE_WINAPI(AllowDarkModeForApp, BOOL, BOOL)
+    WNEF_GENERATE_WINAPI(IsDarkModeAllowedForWindow, BOOL, HWND)
+    WNEF_GENERATE_WINAPI(GetIsImmersiveColorUsingHighContrast, BOOL, IMMERSIVE_HC_CACHE_MODE)
+    WNEF_GENERATE_WINAPI(RefreshImmersiveColorPolicyState, VOID)
+    WNEF_GENERATE_WINAPI(ShouldSystemUseDarkMode, BOOL)
+    WNEF_GENERATE_WINAPI(SetPreferredAppMode, PREFERRED_APP_MODE, PREFERRED_APP_MODE)
+    WNEF_GENERATE_WINAPI(IsDarkModeAllowedForApp, BOOL)
 
 #ifndef WNEF_LINK_SYSLIB
     // Some of the following functions are not used by this code anymore,
@@ -487,6 +521,8 @@ using WNEF_CORE_DATA = struct _WNEF_CORE_DATA
     WNEF_GENERATE_WINAPI(TrackPopupMenu, BOOL, HMENU, UINT, int, int, int, HWND, CONST RECT *)
     WNEF_GENERATE_WINAPI(PostMessageW, BOOL, HWND, UINT, WPARAM, LPARAM)
     WNEF_GENERATE_WINAPI(GetMessagePos, DWORD)
+    WNEF_GENERATE_WINAPI(SystemParametersInfoW, BOOL, UINT, UINT, PVOID, UINT)
+    WNEF_GENERATE_WINAPI(DwmGetColorizationColor, HRESULT, DWORD *, BOOL *)
 
 #endif // WNEF_LINK_SYSLIB
 
@@ -501,6 +537,21 @@ using WNEF_CORE_DATA = struct _WNEF_CORE_DATA
         // Available since Windows 7
         WNEF_RESOLVE_WINAPI(User32, GetWindowCompositionAttribute)
         WNEF_RESOLVE_WINAPI(User32, SetWindowCompositionAttribute)
+        // Available since Windows 10, version 1809 (10.0.17763)
+        if (isWin10OrGreater(17763)) {
+            WNEF_RESOLVE_WINAPI2(UxTheme, ShouldAppsUseDarkMode, 132)
+            WNEF_RESOLVE_WINAPI2(UxTheme, AllowDarkModeForWindow, 133)
+            WNEF_RESOLVE_WINAPI2(UxTheme, AllowDarkModeForApp, 135)
+            WNEF_RESOLVE_WINAPI2(UxTheme, RefreshImmersiveColorPolicyState, 104)
+            WNEF_RESOLVE_WINAPI2(UxTheme, IsDarkModeAllowedForWindow, 137)
+            WNEF_RESOLVE_WINAPI2(UxTheme, GetIsImmersiveColorUsingHighContrast, 106)
+        }
+        // Available since Windows 10, version 1903 (10.0.18362)
+        if (isWin10OrGreater(18362)) {
+            WNEF_RESOLVE_WINAPI2(UxTheme, ShouldSystemUseDarkMode, 138)
+            WNEF_RESOLVE_WINAPI2(UxTheme, SetPreferredAppMode, 135)
+            WNEF_RESOLVE_WINAPI2(UxTheme, IsDarkModeAllowedForApp, 139)
+        }
     }
 
     // These functions were introduced in Win10 1607 or later (mostly),
@@ -566,6 +617,7 @@ using WNEF_CORE_DATA = struct _WNEF_CORE_DATA
         }
         resolved = true;
         // Available since Windows 2000.
+        WNEF_RESOLVE_WINAPI(User32, SystemParametersInfoW)
         WNEF_RESOLVE_WINAPI(User32, GetMessagePos)
         WNEF_RESOLVE_WINAPI(User32, GetSystemMenu)
         WNEF_RESOLVE_WINAPI(User32, SetMenuItemInfoW)
@@ -624,6 +676,7 @@ using WNEF_CORE_DATA = struct _WNEF_CORE_DATA
         WNEF_RESOLVE_WINAPI(Shell32, SHAppBarMessage)
         WNEF_RESOLVE_WINAPI(Kernel32, GetCurrentProcess)
         // Available since Windows Vista.
+        WNEF_RESOLVE_WINAPI(Dwmapi, DwmGetColorizationColor)
         WNEF_RESOLVE_WINAPI(User32, IsProcessDPIAware)
         WNEF_RESOLVE_WINAPI(Dwmapi, DwmGetWindowAttribute)
         WNEF_RESOLVE_WINAPI(Dwmapi, DwmIsCompositionEnabled)
@@ -685,11 +738,7 @@ bool shouldHaveWindowFrame()
         if (should) {
             // If you preserve the window frame on Win7~8.1,
             // the window will have a terrible appearance.
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 9, 0))
-            return QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows10;
-#else
-            return QSysInfo::WindowsVersion >= QSysInfo::WV_WINDOWS10;
-#endif
+            return isWin10OrGreater();
         }
     }
     return false;
@@ -786,9 +835,9 @@ BOOL IsApplicationDpiAware()
 {
     if (coreData()->m_lpGetProcessDpiAwareness) {
         PROCESS_DPI_AWARENESS awareness = PROCESS_DPI_UNAWARE;
-        WNEF_EXECUTE_WINAPI(GetProcessDpiAwareness,
-                            WNEF_EXECUTE_WINAPI_RETURN(GetCurrentProcess, nullptr),
-                            &awareness)
+        coreData()->m_lpGetProcessDpiAwareness(WNEF_EXECUTE_WINAPI_RETURN(GetCurrentProcess,
+                                                                          nullptr),
+                                               &awareness);
         return (awareness != PROCESS_DPI_UNAWARE);
     } else {
         return WNEF_EXECUTE_WINAPI_RETURN(IsProcessDPIAware, FALSE);
@@ -798,26 +847,22 @@ BOOL IsApplicationDpiAware()
 UINT GetDotsPerInchForSystem()
 {
     const auto getScreenDpi = [](const UINT defaultValue) -> UINT {
-        /*
-        if (m_lpD2D1CreateFactory) {
-            // Using Direct2D to get the screen DPI.
-            // Available since Windows 7.
-            ID2D1Factory *m_pDirect2dFactory = nullptr;
-            if (SUCCEEDED(WNEF_EXECUTE_WINAPI_RETURN(D2D1CreateFactory,
-                                                     E_FAIL,
-                                                     D2D1_FACTORY_TYPE_SINGLE_THREADED,
-                                                     __uuidof(ID2D1Factory),
-                                                     nullptr,
-                                                     reinterpret_cast<void **>(&m_pDirect2dFactory)))
-                && m_pDirect2dFactory) {
-                m_pDirect2dFactory->ReloadSystemMetrics();
-                FLOAT dpiX = defaultValue, dpiY = defaultValue;
-                m_pDirect2dFactory->GetDesktopDpi(&dpiX, &dpiY);
-                // The values of *dpiX and *dpiY are identical.
-                return qRound(dpiX == dpiY ? dpiY : dpiX);
-            }
+        // Using Direct2D to get the screen DPI.
+        // Available since Windows 7.
+        ID2D1Factory *m_pDirect2dFactory = nullptr;
+        if (SUCCEEDED(WNEF_EXECUTE_WINAPI_RETURN(D2D1CreateFactory,
+                                                 E_FAIL,
+                                                 D2D1_FACTORY_TYPE_SINGLE_THREADED,
+                                                 __uuidof(ID2D1Factory),
+                                                 nullptr,
+                                                 reinterpret_cast<void **>(&m_pDirect2dFactory)))
+            && m_pDirect2dFactory) {
+            m_pDirect2dFactory->ReloadSystemMetrics();
+            FLOAT dpiX = defaultValue, dpiY = defaultValue;
+            m_pDirect2dFactory->GetDesktopDpi(&dpiX, &dpiY);
+            // The values of *dpiX and *dpiY are identical.
+            return qRound(dpiX == dpiY ? dpiY : dpiX);
         }
-        */
         // Available since Windows 2000.
         const HDC hdc = WNEF_EXECUTE_WINAPI_RETURN(GetDC, nullptr, nullptr);
         if (hdc) {
@@ -831,12 +876,11 @@ UINT GetDotsPerInchForSystem()
         return defaultValue;
     };
     if (coreData()->m_lpGetSystemDpiForProcess) {
-        return WNEF_EXECUTE_WINAPI_RETURN(GetSystemDpiForProcess,
-                                          0,
-                                          WNEF_EXECUTE_WINAPI_RETURN(GetCurrentProcess, nullptr));
+        return coreData()->m_lpGetSystemDpiForProcess(
+            WNEF_EXECUTE_WINAPI_RETURN(GetCurrentProcess, nullptr));
     }
     if (coreData()->m_lpGetDpiForSystem) {
-        return WNEF_EXECUTE_WINAPI_RETURN(GetDpiForSystem, 0);
+        return coreData()->m_lpGetDpiForSystem();
     }
     return getScreenDpi(m_defaultDotsPerInch);
 }
@@ -850,18 +894,17 @@ UINT GetDotsPerInchForWindow(const HWND handle)
     }
     if (WNEF_EXECUTE_WINAPI_RETURN(IsWindow, FALSE, handle)) {
         if (coreData()->m_lpGetDpiForWindow) {
-            return WNEF_EXECUTE_WINAPI_RETURN(GetDpiForWindow, 0, handle);
+            return coreData()->m_lpGetDpiForWindow(handle);
         }
         if (coreData()->m_lpGetDpiForMonitor) {
             UINT dpiX = m_defaultDotsPerInch, dpiY = m_defaultDotsPerInch;
-            WNEF_EXECUTE_WINAPI(GetDpiForMonitor,
-                                WNEF_EXECUTE_WINAPI_RETURN(MonitorFromWindow,
-                                                           nullptr,
-                                                           handle,
-                                                           MONITOR_DEFAULTTONEAREST),
-                                MDT_EFFECTIVE_DPI,
-                                &dpiX,
-                                &dpiY)
+            coreData()->m_lpGetDpiForMonitor(WNEF_EXECUTE_WINAPI_RETURN(MonitorFromWindow,
+                                                                        nullptr,
+                                                                        handle,
+                                                                        MONITOR_DEFAULTTONEAREST),
+                                             MDT_EFFECTIVE_DPI,
+                                             &dpiX,
+                                             &dpiY);
             // The values of *dpiX and *dpiY are identical.
             return dpiX == dpiY ? dpiY : dpiX;
         }
@@ -938,12 +981,15 @@ RECT GetFrameSizeForWindow(const HWND handle, const BOOL includingTitleBar = FAL
         // It's the same with using GetSystemMetrics, the returned values
         // of the two functions are identical.
         if (coreData()->m_lpAdjustWindowRectExForDpi) {
-            WNEF_EXECUTE_WINAPI(AdjustWindowRectExForDpi,
-                                &rect,
-                                includingTitleBar ? (style | WS_CAPTION) : (style & ~WS_CAPTION),
-                                FALSE,
-                                WNEF_EXECUTE_WINAPI_RETURN(GetWindowLongPtrW, 0, handle, GWL_EXSTYLE),
-                                GetDotsPerInchForWindow(handle))
+            coreData()->m_lpAdjustWindowRectExForDpi(&rect,
+                                                     includingTitleBar ? (style | WS_CAPTION)
+                                                                       : (style & ~WS_CAPTION),
+                                                     FALSE,
+                                                     WNEF_EXECUTE_WINAPI_RETURN(GetWindowLongPtrW,
+                                                                                0,
+                                                                                handle,
+                                                                                GWL_EXSTYLE),
+                                                     GetDotsPerInchForWindow(handle));
         } else {
             WNEF_EXECUTE_WINAPI(AdjustWindowRectEx,
                                 &rect,
@@ -989,20 +1035,7 @@ void UpdateFrameMarginsForWindow(const HWND handle)
         // the client area in WM_NCCALCSIZE so we won't see it due to
         // it's covered by the client area (in other words, it's still
         // there, we just can't see it).
-        if (shouldHaveWindowFrame()) {
-            const auto GetTopBorderHeight = [](const HWND handle) -> int {
-                Q_ASSERT(handle);
-                if (WNEF_EXECUTE_WINAPI_RETURN(IsWindow, FALSE, handle)) {
-                    if (IsDwmCompositionEnabled() && !IsMaximized(handle) && !IsFullScreen(handle)) {
-                        return 1;
-                    }
-                }
-                return 0;
-            };
-            if (GetTopBorderHeight(handle) != 0) {
-                margins.cyTopHeight = GetFrameSizeForWindow(handle, TRUE).top;
-            }
-        } else {
+        if (IsDwmCompositionEnabled() && !IsMaximized(handle) && !IsFullScreen(handle)) {
             margins.cyTopHeight = 1;
         }
         if (shouldUseNativeTitleBar() || dontExtendFrame()) {
@@ -1019,11 +1052,9 @@ int GetSystemMetricsForWindow(const HWND handle, const int index)
     Q_ASSERT(handle);
     if (WNEF_EXECUTE_WINAPI_RETURN(IsWindow, FALSE, handle)) {
         if (coreData()->m_lpGetSystemMetricsForDpi) {
-            return WNEF_EXECUTE_WINAPI_RETURN(GetSystemMetricsForDpi,
-                                              0,
-                                              index,
-                                              static_cast<UINT>(qRound(GetPreferedNumber(
-                                                  GetDotsPerInchForWindow(handle)))));
+            return coreData()->m_lpGetSystemMetricsForDpi(index,
+                                                          static_cast<UINT>(qRound(GetPreferedNumber(
+                                                              GetDotsPerInchForWindow(handle)))));
         } else {
             return qRound(WNEF_EXECUTE_WINAPI_RETURN(GetSystemMetrics, 0, index)
                           * GetDevicePixelRatioForWindow(handle));
@@ -1207,6 +1238,10 @@ const int m_defaultBorderWidth = 8, m_defaultBorderHeight = 8, m_defaultTitleBar
 // The thickness of an auto-hide taskbar in pixels.
 const int kAutoHideTaskbarThicknessPx = 2;
 const int kAutoHideTaskbarThicknessPy = kAutoHideTaskbarThicknessPx;
+
+const QLatin1String g_sDwmRegistryKey(R"(HKEY_CURRENT_USER\Software\Microsoft\Windows\DWM)");
+const QLatin1String g_sPersonalizeRegistryKey(
+    R"(HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize)");
 
 } // namespace
 
@@ -2313,7 +2348,7 @@ void WinNativeEventFilter::updateQtFrame(QWindow *window, const int titleBarHeig
                                     marginsVar);
         }
 #else
-        auto *platformWindow = qobject_cast<QNativeInterface::Private::QWindowsWindow *>(
+        auto *platformWindow = dynamic_cast<QNativeInterface::Private::QWindowsWindow *>(
             window->handle());
         if (platformWindow) {
             platformWindow->setCustomMargins(margins);
@@ -2397,7 +2432,11 @@ bool WinNativeEventFilter::setBlurEffectEnabled(void *handle,
             // it will cover the blurred effect, so we need to
             // make the background become totally transparent. Achieve
             // this by setting a palette to the window.
-            widget->setPalette(enabled ? QPalette(Qt::transparent) : QPalette());
+            QPalette palette = {};
+            if (enabled) {
+                palette.setColor(QPalette::Window, Qt::transparent);
+            }
+            widget->setPalette(palette);
         }
 #endif
         if (isWin8OrGreater() && coreData()->m_lpSetWindowCompositionAttribute) {
@@ -2484,4 +2523,91 @@ void WinNativeEventFilter::setWindowResizable(void *handle, const bool resizable
                             resizable ? resizableStyle : fixedSizeStyle)
         updateWindow(hwnd, true, false);
     }
+}
+
+bool WinNativeEventFilter::colorizationEnabled()
+{
+    if (!isWin10OrGreater()) {
+        return false;
+    }
+    bool ok = false;
+    const QSettings registry(g_sDwmRegistryKey, QSettings::NativeFormat);
+    const bool colorPrevalence = registry.value(QLatin1String("ColorPrevalence"), 0).toULongLong(&ok)
+                                 != 0;
+    return (ok && colorPrevalence);
+}
+
+QColor WinNativeEventFilter::colorizationColor()
+{
+#if 1
+    DWORD color = 0;
+    BOOL opaqueBlend = FALSE;
+    return SUCCEEDED(
+               WNEF_EXECUTE_WINAPI_RETURN(DwmGetColorizationColor, E_FAIL, &color, &opaqueBlend))
+               ? QColor::fromRgba(color)
+               : Qt::white;
+#else
+    bool ok = false;
+    const QSettings registry(g_sDwmRegistryKey, QSettings::NativeFormat);
+    const quint64 color = registry.value(QLatin1String("ColorizationColor"), 0).toULongLong(&ok);
+    return ok ? QColor::fromRgba(color) : Qt::white;
+#endif
+}
+
+bool WinNativeEventFilter::lightThemeEnabled()
+{
+    return !darkThemeEnabled();
+}
+
+bool WinNativeEventFilter::darkThemeEnabled()
+{
+    return coreData()->m_lpShouldAppsUseDarkMode ? coreData()->m_lpShouldAppsUseDarkMode() : false;
+}
+
+bool WinNativeEventFilter::highContrastModeEnabled()
+{
+    HIGHCONTRASTW hc;
+    SecureZeroMemory(&hc, sizeof(hc));
+    hc.cbSize = sizeof(hc);
+    return WNEF_EXECUTE_WINAPI_RETURN(SystemParametersInfoW, FALSE, SPI_GETHIGHCONTRAST, 0, &hc, 0)
+               ? (hc.dwFlags & HCF_HIGHCONTRASTON)
+               : false;
+}
+
+bool WinNativeEventFilter::darkFrameEnabled(void *handle)
+{
+    Q_ASSERT(handle);
+    if (!isWin10OrGreater(17763)) {
+        return false;
+    }
+    const auto hwnd = reinterpret_cast<HWND>(handle);
+    if (WNEF_EXECUTE_WINAPI_RETURN(IsWindow, FALSE, hwnd)) {
+        BOOL result = FALSE;
+        const bool ok = SUCCEEDED(WNEF_EXECUTE_WINAPI_RETURN(DwmGetWindowAttribute,
+                                                             E_FAIL,
+                                                             hwnd,
+                                                             DwmwaUseImmersiveDarkMode,
+                                                             &result,
+                                                             sizeof(result)))
+                        || SUCCEEDED(WNEF_EXECUTE_WINAPI_RETURN(DwmGetWindowAttribute,
+                                                                E_FAIL,
+                                                                hwnd,
+                                                                DwmwaUseImmersiveDarkModeBefore20h1,
+                                                                &result,
+                                                                sizeof(result)));
+        return (ok && result);
+    }
+    return false;
+}
+
+bool WinNativeEventFilter::transparencyEffectEnabled()
+{
+    if (!isWin10OrGreater()) {
+        return false;
+    }
+    bool ok = false;
+    const QSettings registry(g_sPersonalizeRegistryKey, QSettings::NativeFormat);
+    const bool enableTransparency
+        = registry.value(QLatin1String("EnableTransparency"), 0).toULongLong(&ok) != 0;
+    return (ok && enableTransparency);
 }
