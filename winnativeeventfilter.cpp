@@ -1833,7 +1833,7 @@ bool WinNativeEventFilter::nativeEventFilter(const QByteArray &eventType,
 #ifdef QT_WIDGETS_LIB
                         const auto widget = qobject_cast<QWidget *>(object);
                         if (widget) {
-                            const QPoint pos = widget->mapToGlobal({0, 0});
+                            const QPointF pos = widget->mapToGlobal(QPointF{0, 0});
                             if (QRectF(pos.x() * dpr,
                                        pos.y() * dpr,
                                        widget->width() * dpr,
@@ -1846,7 +1846,7 @@ bool WinNativeEventFilter::nativeEventFilter(const QByteArray &eventType,
 #ifdef QT_QUICK_LIB
                         const auto quickItem = qobject_cast<QQuickItem *>(object);
                         if (quickItem) {
-                            const QPointF pos = quickItem->mapToGlobal({0, 0});
+                            const QPointF pos = quickItem->mapToGlobal(QPointF{0, 0});
                             if (QRectF(pos.x() * dpr,
                                        pos.y() * dpr,
                                        quickItem->width() * dpr,
@@ -1881,14 +1881,17 @@ bool WinNativeEventFilter::nativeEventFilter(const QByteArray &eventType,
                                                                     dpr)
                                                 : true;
 #if defined(QT_WIDGETS_LIB) || defined(QT_QUICK_LIB)
-            const bool isInIgnoreObjects = isInSpecificObjects(globalMouse.x,
-                                                               globalMouse.y,
+            // For this purpose, QCursor give more accurate position
+            // than windows when using several monitors.
+            const auto qtGlobalMousePos = QCursor::pos() * dpr;
+            const bool isInIgnoreObjects = isInSpecificObjects(qtGlobalMousePos.x(),
+                                                               qtGlobalMousePos.y(),
                                                                data->ignoreObjects,
                                                                dpr);
             const bool customDragObjects = !data->draggableObjects.isEmpty();
             const bool isInDraggableObjects = customDragObjects
-                                                  ? isInSpecificObjects(globalMouse.x,
-                                                                        globalMouse.y,
+                                                  ? isInSpecificObjects(qtGlobalMousePos.x(),
+                                                                        qtGlobalMousePos.y(),
                                                                         data->draggableObjects,
                                                                         dpr)
                                                   : true;
@@ -2539,19 +2542,12 @@ bool WinNativeEventFilter::colorizationEnabled()
 
 QColor WinNativeEventFilter::colorizationColor()
 {
-#if 1
     DWORD color = 0;
     BOOL opaqueBlend = FALSE;
     return SUCCEEDED(
                WNEF_EXECUTE_WINAPI_RETURN(DwmGetColorizationColor, E_FAIL, &color, &opaqueBlend))
                ? QColor::fromRgba(color)
                : Qt::white;
-#else
-    bool ok = false;
-    const QSettings registry(g_sDwmRegistryKey, QSettings::NativeFormat);
-    const quint64 color = registry.value(QLatin1String("ColorizationColor"), 0).toULongLong(&ok);
-    return ok ? QColor::fromRgba(color) : Qt::white;
-#endif
 }
 
 bool WinNativeEventFilter::lightThemeEnabled()
@@ -2561,7 +2557,8 @@ bool WinNativeEventFilter::lightThemeEnabled()
 
 bool WinNativeEventFilter::darkThemeEnabled()
 {
-    return coreData()->m_lpShouldAppsUseDarkMode ? coreData()->m_lpShouldAppsUseDarkMode() : false;
+    return coreData()->m_lpShouldSystemUseDarkMode ? coreData()->m_lpShouldSystemUseDarkMode()
+                                                   : false;
 }
 
 bool WinNativeEventFilter::highContrastModeEnabled()
