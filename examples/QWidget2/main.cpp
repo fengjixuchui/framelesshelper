@@ -22,13 +22,9 @@
  * SOFTWARE.
  */
 
-#include "../../framelesswindowsmanager.h"
+#include "widget.h"
 #include <QApplication>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QPushButton>
-#include <QVBoxLayout>
-#include <QWidget>
+#include <QStyleOption>
 
 int main(int argc, char *argv[])
 {
@@ -55,55 +51,13 @@ int main(int argc, char *argv[])
 #endif
 
     QApplication application(argc, argv);
-
-    QWidget widget;
-    widget.setContentsMargins(2, 2, 2, 2);
-    QLabel *label = new QLabel;
-    QObject::connect(&widget, &QWidget::windowTitleChanged, label, &QLabel::setText);
-    QPushButton *minimizeButton = new QPushButton;
-    minimizeButton->setText(QObject::tr("Minimize"));
-    QObject::connect(minimizeButton, &QPushButton::clicked, &widget, &QWidget::showMinimized);
-    QPushButton *maximizeButton = new QPushButton;
-    maximizeButton->setText(QObject::tr("Maximize"));
-    QObject::connect(maximizeButton, &QPushButton::clicked, [&widget, &maximizeButton]() {
-        if (widget.isMaximized()) {
-            widget.showNormal();
-            maximizeButton->setText(QObject::tr("Maximize"));
-        } else {
-            widget.showMaximized();
-            maximizeButton->setText(QObject::tr("Restore"));
-        }
-    });
-    QPushButton *closeButton = new QPushButton;
-    closeButton->setText(QObject::tr("Close"));
-    QObject::connect(closeButton, &QPushButton::clicked, &widget, &QWidget::close);
-    QHBoxLayout *tbLayout = new QHBoxLayout;
-    tbLayout->setContentsMargins(0, 0, 0, 0);
-    tbLayout->setSpacing(0);
-    tbLayout->addSpacing(15);
-    tbLayout->addWidget(label);
-    tbLayout->addStretch();
-    tbLayout->addWidget(minimizeButton);
-    tbLayout->addWidget(maximizeButton);
-    tbLayout->addWidget(closeButton);
-    QVBoxLayout *mainLayout = new QVBoxLayout;
-    mainLayout->setContentsMargins(0, 0, 0, 0);
-    mainLayout->setSpacing(0);
-    mainLayout->addLayout(tbLayout);
-    mainLayout->addStretch();
-    widget.setLayout(mainLayout);
+    Widget widget;
+    QStyleOption option;
+    option.initFrom(&widget);
+    const QIcon icon = widget.style()->standardIcon(QStyle::SP_ComputerIcon, &option);
+    widget.setWindowIcon(icon);
     widget.setWindowTitle(QObject::tr("Hello, World!"));
-
-    widget.createWinId(); // Qt's internal function, make sure it's a top level window.
-    const QWindow *win = widget.windowHandle();
-    FramelessWindowsManager::addWindow(win);
-    FramelessWindowsManager::addIgnoreObject(win, minimizeButton);
-    FramelessWindowsManager::addIgnoreObject(win, maximizeButton);
-    FramelessWindowsManager::addIgnoreObject(win, closeButton);
-
     widget.resize(800, 600);
-
     widget.show();
-
     return QApplication::exec();
 }

@@ -29,7 +29,7 @@
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 15, 0))
 #include <QHash>
 #include <QObject>
-#include <QRect>
+#include <QRectF>
 
 QT_BEGIN_NAMESPACE
 QT_FORWARD_DECLARE_CLASS(QWindow)
@@ -44,10 +44,10 @@ public:
     explicit FramelessHelper(QObject *parent = nullptr);
     ~FramelessHelper() override = default;
 
-    void removeWindowFrame(QObject *obj, const bool center = false);
+    void removeWindowFrame(QWindow *window, const bool center = false);
 
     static void updateQtFrame(QWindow *window, const int titleBarHeight);
-    static void moveWindowToDesktopCenter(QObject *obj);
+    static void moveWindowToDesktopCenter(QWindow *window);
 
     int getBorderWidth() const;
     void setBorderWidth(const int val);
@@ -58,34 +58,34 @@ public:
     int getTitleBarHeight() const;
     void setTitleBarHeight(const int val);
 
-    void addIgnoreArea(QObject *obj, const QRect &val);
-    QList<QRect> getIgnoreAreas(QObject *obj) const;
+    void addIgnoreArea(const QWindow *window, const QRectF &val);
+    QList<QRectF> getIgnoreAreas(const QWindow *window) const;
 
-    void addDraggableArea(QObject *obj, const QRect &val);
-    QList<QRect> getDraggableAreas(QObject *obj) const;
+    void addDraggableArea(const QWindow *window, const QRectF &val);
+    QList<QRectF> getDraggableAreas(const QWindow *window) const;
 
-    void addIgnoreObject(QObject *obj, QObject *val);
-    QList<QObject *> getIgnoreObjects(QObject *obj) const;
+    void addIgnoreObject(const QWindow *window, QObject *val);
+    QObjectList getIgnoreObjects(const QWindow *window) const;
 
-    void addDraggableObject(QObject *obj, QObject *val);
-    QList<QObject *> getDraggableObjects(QObject *obj) const;
+    void addDraggableObject(const QWindow *window, QObject *val);
+    QObjectList getDraggableObjects(const QWindow *window) const;
 
-    bool getResizable(QObject *obj) const;
-    void setResizable(QObject *obj, const bool val);
+    bool getResizable(const QWindow *window) const;
+    void setResizable(const QWindow *window, const bool val);
 
-    bool getTitleBarEnabled(QObject *obj) const;
-    void setTitleBarEnabled(QObject *obj, const bool val);
+    bool getTitleBarEnabled(const QWindow *window) const;
+    void setTitleBarEnabled(const QWindow *window, const bool val);
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
-    // ### TODO: The default border width and height on Windows is 8 pixels if
+    // ### FIXME: The default border width and height on Windows is 8 pixels if
     // the scale factor is 1.0. Don't know how to acquire these values on UNIX
     // platforms through native API.
     int m_borderWidth = 8, m_borderHeight = 8, m_titleBarHeight = 30;
-    QHash<QObject *, QList<QRect>> m_ignoreAreas = {}, m_draggableAreas = {};
-    QHash<QObject *, QList<QObject *>> m_ignoreObjects = {}, m_draggableObjects = {};
-    QHash<QObject *, bool> m_fixedSize = {}, m_disableTitleBar = {};
+    QHash<const QWindow *, QList<QRectF>> m_ignoreAreas = {}, m_draggableAreas = {};
+    QHash<const QWindow *, QObjectList> m_ignoreObjects = {}, m_draggableObjects = {};
+    QHash<const QWindow *, bool> m_fixedSize = {}, m_disableTitleBar = {};
 };
 #endif

@@ -28,11 +28,11 @@
 #include <QAbstractNativeEventFilter>
 #include <QColor>
 #include <QList>
+#include <QObject>
 #include <QRect>
 
 QT_BEGIN_NAMESPACE
 QT_FORWARD_DECLARE_CLASS(QWindow)
-QT_FORWARD_DECLARE_CLASS(QObject)
 QT_END_NAMESPACE
 
 #if (QT_VERSION < QT_VERSION_CHECK(5, 13, 0))
@@ -54,10 +54,11 @@ public:
     {
         bool initialized = false /* Internal use only, don't modify it from outside */,
              fixedSize = false, mouseTransparent = false, restoreDefaultWindowStyle = false,
-             enableLayeredWindow = false, disableTitleBar = false, enableBlurBehindWindow = false;
+             enableLayeredWindow = false, disableTitleBar = false, enableBlurBehindWindow = false,
+             framelessModeEnabled = false;
         int borderWidth = -1, borderHeight = -1, titleBarHeight = -1;
         QList<QRect> ignoreAreas = {}, draggableAreas = {};
-        QList<QObject *> ignoreObjects = {}, draggableObjects = {};
+        QObjectList ignoreObjects = {}, draggableObjects = {};
         QSize maximumSize = {}, minimumSize = {};
         QString currentScreen = {};
     };
@@ -71,34 +72,23 @@ public:
     // The width and height will be scaled automatically according to DPI. Don't
     // scale them yourself. Just pass the original value. If you don't want to
     // change them, pass negative values to the parameters.
-    static void addFramelessWindow(void *window /* HWND */,
+    static void addFramelessWindow(const QWindow *window,
                                    const WINDOWDATA *data = nullptr,
                                    const bool center = false,
                                    const int x = -1,
                                    const int y = -1,
                                    const int width = -1,
                                    const int height = -1);
-    static void addFramelessWindow(QObject *window,
-                                   const WINDOWDATA *data = nullptr,
-                                   const bool center = false,
-                                   const int x = -1,
-                                   const int y = -1,
-                                   const int width = -1,
-                                   const int height = -1);
-    static void removeFramelessWindow(void *window /* HWND */);
-    static void removeFramelessWindow(QObject *window);
-    static void clearFramelessWindows();
+    static void removeFramelessWindow(const QWindow *window);
 
     // Set borderWidth, borderHeight or titleBarHeight to a negative value to
     // restore default behavior.
     // Note that it can only affect one specific window.
     // If you want to change these values globally, use setBorderWidth instead.
-    static void setWindowData(void *window /* HWND */, const WINDOWDATA *data);
-    static void setWindowData(QObject *window, const WINDOWDATA *data);
+    static void setWindowData(const QWindow *window, const WINDOWDATA *data);
     // You can modify the given window's data directly, it's the same with using
     // setWindowData.
-    static WINDOWDATA *windowData(void *window /* HWND */);
-    static WINDOWDATA *windowData(QObject *window);
+    static WINDOWDATA *getWindowData(const QWindow *window);
 
     // Change settings globally, not a specific window.
     // These values will be scaled automatically according to DPI, don't scale
@@ -109,14 +99,15 @@ public:
 
     // System metric value of the given window (if the pointer is null,
     // return the system's standard value).
-    static int getSystemMetric(void *handle /* HWND */,
+    static int getSystemMetric(const QWindow *window,
                                const SystemMetric metric,
-                               const bool dpiAware = false);
+                               const bool dpiAware = false,
+                               const bool forceSystemValue = false);
 
     // Use this function to trigger a frame change event or redraw a
     // specific window. Useful when you want to let some changes
     // in effect immediately.
-    static void updateWindow(void *handle /* HWND */,
+    static void updateWindow(const QWindow *window,
                              const bool triggerFrameChange = true,
                              const bool redraw = true);
 
@@ -124,10 +115,10 @@ public:
     // The width and height will be scaled automatically according to DPI. So
     // just pass the original value.
     static void setWindowGeometry(
-        void *handle /* HWND */, const int x, const int y, const int width, const int height);
+        const QWindow *window, const int x, const int y, const int width, const int height);
 
     // Move the window to the center of the desktop.
-    static void moveWindowToDesktopCenter(void *handle /* HWND */);
+    static void moveWindowToDesktopCenter(const QWindow *window);
 
     // Update Qt's internal data about the window frame, otherwise Qt will
     // take the size of the window frame into account when anyone is trying to
@@ -135,44 +126,41 @@ public:
     static void updateQtFrame(QWindow *window, const int titleBarHeight);
 
     // Display the system context menu.
-    static bool displaySystemMenu(void *handle /* HWND */,
-                                  const bool isRtl,
-                                  const int x,
-                                  const int y);
+    static bool displaySystemMenu(const QWindow *window, const QPointF &pos = {});
 
     // Enable or disable the blur effect for a specific window.
     // On Win10 it's the Acrylic effect.
-    static bool setBlurEffectEnabled(void *handle /* HWND */,
+    static bool setBlurEffectEnabled(const QWindow *window,
                                      const bool enabled = true,
                                      const QColor &gradientColor = Qt::white);
 
     // Thin wrapper of DwmExtendFrameIntoClientArea().
-    static void updateFrameMargins(void *handle /* HWND */);
+    static void updateFrameMargins(const QWindow *window);
 
     // A resizable window can be resized and maximized, however, a fixed size
     // window can only be moved and minimized, it can't be resized and maximized.
-    static void setWindowResizable(void *handle /* HWND */, const bool resizable = true);
+    static void setWindowResizable(const QWindow *window, const bool resizable = true);
 
     // Query whether colorization is enabled or not.
-    static bool colorizationEnabled();
+    static bool isColorizationEnabled();
 
     // Acquire the theme/colorization color set by the user.
-    static QColor colorizationColor();
+    static QColor getColorizationColor();
 
     // Query whether the user is using the light theme or not.
-    static bool lightThemeEnabled();
+    static bool isLightThemeEnabled();
 
     // Query whether the user is using the dark theme or not.
-    static bool darkThemeEnabled();
+    static bool isDarkThemeEnabled();
 
     // Query whether the high contrast mode is enabled or not.
-    static bool highContrastModeEnabled();
+    static bool isHighContrastModeEnabled();
 
     // Query whether the given window is using dark frame or not.
-    static bool darkFrameEnabled(void *handle /* HWND */);
+    static bool isDarkFrameEnabled(const QWindow *window);
 
     // Query whether the transparency effect is enabled or not.
-    static bool transparencyEffectEnabled();
+    static bool isTransparencyEffectEnabled();
 
     ///////////////////////////////////////////////
     ///   CORE FUNCTION - THE SOUL OF THIS CODE

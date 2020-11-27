@@ -61,27 +61,23 @@ const char g_sDontExtendFrame[] = "WNEF_DO_NOT_EXTEND_FRAME";
 
 const QLatin1String g_sSystemButtonsStyleSheet(R"(
 #iconButton, #minimizeButton, #maximizeButton, #closeButton {
+  border-style: none;
   background-color: transparent;
-  border-radius: 0px;
 }
 
 #minimizeButton:hover, #maximizeButton:hover {
-  border-style: none;
   background-color: #80c7c7c7;
 }
 
 #minimizeButton:pressed, #maximizeButton:pressed {
-  border-style: none;
   background-color: #80808080;
 }
 
 #closeButton:hover {
-  border-style: none;
   background-color: #e81123;
 }
 
 #closeButton:pressed {
-  border-style: none;
   background-color: #8c0a15;
 }
 )");
@@ -138,6 +134,7 @@ const QLatin1String g_sCloseButtonImageLight(":/images/button_close_white.svg");
 
 Widget::Widget(QWidget *parent) : QWidget(parent)
 {
+    createWinId(); // Qt's internal function, make sure it's a top level window.
     initializeWindow();
 }
 
@@ -170,7 +167,7 @@ void Widget::setupUi()
     sizePolicy.setHeightForWidth(titleBarWidget->sizePolicy().hasHeightForWidth());
     titleBarWidget->setSizePolicy(sizePolicy);
     const int titleBarHeight
-        = WinNativeEventFilter::getSystemMetric(rawHandle(),
+        = WinNativeEventFilter::getSystemMetric(windowHandle(),
                                                 WinNativeEventFilter::SystemMetric::TitleBarHeight);
     titleBarWidget->setMinimumSize(QSize(0, titleBarHeight));
     titleBarWidget->setMaximumSize(QSize(16777215, titleBarHeight));
@@ -178,12 +175,12 @@ void Widget::setupUi()
     horizontalLayout->setSpacing(0);
     horizontalLayout->setContentsMargins(0, 0, 0, 0);
     horizontalSpacer_7 = new QSpacerItem(3, 20, QSizePolicy::Fixed, QSizePolicy::Minimum);
-    horizontalLayout->addItem(horizontalSpacer_7);
+    horizontalLayout->addSpacerItem(horizontalSpacer_7);
     iconButton = new QPushButton(titleBarWidget);
     iconButton->setObjectName(QLatin1String("iconButton"));
     horizontalLayout->addWidget(iconButton);
     horizontalSpacer = new QSpacerItem(3, 20, QSizePolicy::Fixed, QSizePolicy::Minimum);
-    horizontalLayout->addItem(horizontalSpacer);
+    horizontalLayout->addSpacerItem(horizontalSpacer);
     titleLabel = new QLabel(titleBarWidget);
     titleLabel->setObjectName(QLatin1String("titleLabel"));
     QFont font;
@@ -191,7 +188,7 @@ void Widget::setupUi()
     titleLabel->setFont(font);
     horizontalLayout->addWidget(titleLabel);
     horizontalSpacer_2 = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
-    horizontalLayout->addItem(horizontalSpacer_2);
+    horizontalLayout->addSpacerItem(horizontalSpacer_2);
     minimizeButton = new QPushButton(titleBarWidget);
     minimizeButton->setObjectName(QLatin1String("minimizeButton"));
     QSizePolicy sizePolicy1(QSizePolicy::Fixed, QSizePolicy::Fixed);
@@ -199,7 +196,7 @@ void Widget::setupUi()
     sizePolicy1.setVerticalStretch(0);
     sizePolicy1.setHeightForWidth(minimizeButton->sizePolicy().hasHeightForWidth());
     minimizeButton->setSizePolicy(sizePolicy1);
-    const QSize systemButtonSize = {45, 30};
+    const QSize systemButtonSize = {qRound(titleBarHeight * 1.5), titleBarHeight};
     minimizeButton->setMinimumSize(systemButtonSize);
     minimizeButton->setMaximumSize(systemButtonSize);
     QIcon icon;
@@ -238,10 +235,10 @@ void Widget::setupUi()
     contentsWidget->setSizePolicy(sizePolicy2);
     verticalLayout_2 = new QVBoxLayout(contentsWidget);
     verticalSpacer_2 = new QSpacerItem(20, 40, QSizePolicy::Minimum, QSizePolicy::Expanding);
-    verticalLayout_2->addItem(verticalSpacer_2);
+    verticalLayout_2->addSpacerItem(verticalSpacer_2);
     horizontalLayout_2 = new QHBoxLayout();
     horizontalSpacer_3 = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
-    horizontalLayout_2->addItem(horizontalSpacer_3);
+    horizontalLayout_2->addSpacerItem(horizontalSpacer_3);
     controlPanelWidget = new QWidget(contentsWidget);
     QSizePolicy sizePolicy3(QSizePolicy::Maximum, QSizePolicy::Maximum);
     sizePolicy3.setHorizontalStretch(0);
@@ -253,7 +250,11 @@ void Widget::setupUi()
     QFont font1;
     font1.setPointSize(15);
     font1.setBold(true);
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+    font1.setWeight(QFont::Bold);
+#else
     font1.setWeight(75);
+#endif
     customizeTitleBarCB->setFont(font1);
     verticalLayout->addWidget(customizeTitleBarCB);
     preserveWindowFrameCB = new QCheckBox(controlPanelWidget);
@@ -274,18 +275,18 @@ void Widget::setupUi()
     verticalLayout->addWidget(resizableCB);
     horizontalLayout_2->addWidget(controlPanelWidget);
     horizontalSpacer_4 = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
-    horizontalLayout_2->addItem(horizontalSpacer_4);
+    horizontalLayout_2->addSpacerItem(horizontalSpacer_4);
     verticalLayout_2->addLayout(horizontalLayout_2);
     verticalSpacer = new QSpacerItem(20, 40, QSizePolicy::Minimum, QSizePolicy::Expanding);
-    verticalLayout_2->addItem(verticalSpacer);
+    verticalLayout_2->addSpacerItem(verticalSpacer);
     horizontalLayout_3 = new QHBoxLayout();
     horizontalSpacer_5 = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
-    horizontalLayout_3->addItem(horizontalSpacer_5);
+    horizontalLayout_3->addSpacerItem(horizontalSpacer_5);
     moveCenterButton = new QPushButton(contentsWidget);
     moveCenterButton->setFont(font1);
     horizontalLayout_3->addWidget(moveCenterButton);
     horizontalSpacer_6 = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
-    horizontalLayout_3->addItem(horizontalSpacer_6);
+    horizontalLayout_3->addSpacerItem(horizontalSpacer_6);
     verticalLayout_2->addLayout(horizontalLayout_3);
     verticalLayout_3->addWidget(contentsWidget);
     if (shouldDrawBorder()) {
@@ -309,18 +310,18 @@ bool Widget::shouldDrawBorder(const bool ignoreWindowState) const
 
 bool Widget::shouldDrawThemedBorder(const bool ignoreWindowState) const
 {
-    return (shouldDrawBorder(ignoreWindowState) && WinNativeEventFilter::colorizationEnabled());
+    return (shouldDrawBorder(ignoreWindowState) && WinNativeEventFilter::isColorizationEnabled());
 }
 
 bool Widget::shouldDrawThemedTitleBar() const
 {
-    return m_bIsWin10OrGreater && WinNativeEventFilter::colorizationEnabled();
+    return m_bIsWin10OrGreater && WinNativeEventFilter::isColorizationEnabled();
 }
 
 QColor Widget::activeBorderColor()
 {
-    return WinNativeEventFilter::colorizationEnabled() ? g_cColorizationColor
-                                                       : g_cDefaultActiveBorderColor;
+    return WinNativeEventFilter::isColorizationEnabled() ? g_cColorizationColor
+                                                         : g_cDefaultActiveBorderColor;
 }
 
 QColor Widget::inactiveBorderColor()
@@ -344,11 +345,6 @@ bool Widget::isWin10OrGreater(const Win10Version subVer)
                                               static_cast<int>(subVer))));
 }
 
-void *Widget::rawHandle() const
-{
-    return reinterpret_cast<void *>(winId());
-}
-
 bool Widget::eventFilter(QObject *object, QEvent *event)
 {
     Q_ASSERT(object);
@@ -369,7 +365,7 @@ bool Widget::eventFilter(QObject *object, QEvent *event)
             break;
         }
         case QEvent::WinIdChange:
-            WinNativeEventFilter::addFramelessWindow(this);
+            WinNativeEventFilter::addFramelessWindow(windowHandle());
             break;
         case QEvent::WindowActivate:
         case QEvent::WindowDeactivate:
@@ -396,9 +392,7 @@ bool Widget::nativeEvent(const QByteArray &eventType, void *message, long *resul
         switch (msg->message) {
         case WM_NCRBUTTONUP: {
             if (msg->wParam == HTCAPTION) {
-                const int x = GET_X_LPARAM(msg->lParam);
-                const int y = GET_Y_LPARAM(msg->lParam);
-                if (WinNativeEventFilter::displaySystemMenu(msg->hwnd, false, x, y)) {
+                if (WinNativeEventFilter::displaySystemMenu(windowHandle())) {
                     *result = 0;
                     return true;
                 }
@@ -431,7 +425,7 @@ void Widget::paintEvent(QPaintEvent *event)
     if (shouldDrawBorder()) {
         QPainter painter(this);
         painter.save();
-        painter.setPen({borderColor(), 2.0});
+        painter.setPen({borderColor(), 1.5});
         painter.drawLine(0, 0, width(), 0);
         painter.drawLine(0, height(), width(), height());
         painter.drawLine(0, 0, 0, height());
@@ -442,8 +436,8 @@ void Widget::paintEvent(QPaintEvent *event)
 
 void Widget::updateWindow()
 {
-    WinNativeEventFilter::updateFrameMargins(rawHandle());
-    WinNativeEventFilter::updateWindow(rawHandle(), true, true);
+    WinNativeEventFilter::updateFrameMargins(windowHandle());
+    WinNativeEventFilter::updateWindow(windowHandle(), true, true);
     update();
 }
 
@@ -500,7 +494,7 @@ void Widget::initializeOptions()
     if (m_bIsWin10OrGreater) {
         //preserveWindowFrameCB->click();
         if (m_bCanAcrylicBeEnabled) {
-            forceAcrylicCB->click();
+            //forceAcrylicCB->click();
         }
     }
     customizeTitleBarCB->click();
@@ -512,12 +506,6 @@ void Widget::initializeOptions()
 
 void Widget::setupConnections()
 {
-    connect(iconButton, &QPushButton::clicked, this, [this]() {
-        POINT pos = {};
-        GetCursorPos(&pos);
-        const auto hwnd = reinterpret_cast<HWND>(rawHandle());
-        SendMessageW(hwnd, WM_CONTEXTMENU, reinterpret_cast<WPARAM>(hwnd), MAKELPARAM(pos.x, pos.y));
-    });
     connect(minimizeButton, &QPushButton::clicked, this, &Widget::showMinimized);
     connect(maximizeButton, &QPushButton::clicked, this, [this]() {
         if (isMaximized()) {
@@ -528,7 +516,7 @@ void Widget::setupConnections()
     });
     connect(closeButton, &QPushButton::clicked, this, &Widget::close);
     connect(moveCenterButton, &QPushButton::clicked, this, [this]() {
-        WinNativeEventFilter::moveWindowToDesktopCenter(rawHandle());
+        WinNativeEventFilter::moveWindowToDesktopCenter(windowHandle());
     });
     connect(this, &Widget::windowTitleChanged, titleLabel, &QLabel::setText);
     connect(this, &Widget::windowIconChanged, iconButton, &QPushButton::setIcon);
@@ -537,7 +525,7 @@ void Widget::setupConnections()
         preserveWindowFrameCB->setEnabled(enable);
         WinNativeEventFilter::updateQtFrame(windowHandle(),
                                             enable ? WinNativeEventFilter::getSystemMetric(
-                                                rawHandle(),
+                                                windowHandle(),
                                                 WinNativeEventFilter::SystemMetric::TitleBarHeight)
                                                    : 0);
         titleBarWidget->setVisible(enable);
@@ -577,9 +565,18 @@ void Widget::setupConnections()
                                                QColorDialog::ShowAlphaChannel);
             }
         }
-        WinNativeEventFilter::setBlurEffectEnabled(rawHandle(), enable, color);
+        // Qt will paint a solid white background to the window,
+        // it will cover the blurred effect, so we need to
+        // make the background become totally transparent. Achieve
+        // this by setting a palette to the window.
+        QPalette palette = {};
+        if (enable) {
+            palette.setColor(QPalette::Window, Qt::transparent);
+        }
+        setPalette(palette);
+        WinNativeEventFilter::setBlurEffectEnabled(windowHandle(), enable, color);
         updateWindow();
-        if (useAcrylicEffect && enable && WinNativeEventFilter::transparencyEffectEnabled()) {
+        if (useAcrylicEffect && enable && WinNativeEventFilter::isTransparencyEffectEnabled()) {
             QMessageBox::warning(this,
                                  tr("BUG Warning!"),
                                  tr("You have enabled the transparency effect in the personalize "
@@ -609,7 +606,7 @@ void Widget::setupConnections()
     connect(resizableCB, &QCheckBox::stateChanged, this, [this](int state) {
         const bool enable = state == Qt::Checked;
         maximizeButton->setEnabled(enable);
-        WinNativeEventFilter::setWindowResizable(rawHandle(), enable);
+        WinNativeEventFilter::setWindowResizable(windowHandle(), enable);
     });
 }
 
@@ -617,7 +614,7 @@ void Widget::initializeFramelessFunctions()
 {
     WinNativeEventFilter::WINDOWDATA data = {};
     data.ignoreObjects << iconButton << minimizeButton << maximizeButton << closeButton;
-    WinNativeEventFilter::addFramelessWindow(this, &data);
+    WinNativeEventFilter::addFramelessWindow(windowHandle(), &data);
     installEventFilter(this);
 }
 
@@ -626,7 +623,7 @@ void Widget::initializeVariables()
     m_bIsWin10OrGreater = isWin10OrGreater();
     if (m_bIsWin10OrGreater) {
         m_bCanAcrylicBeEnabled = isWin10OrGreater(g_vAcrylicEffectVersion);
-        g_cColorizationColor = WinNativeEventFilter::colorizationColor();
+        g_cColorizationColor = WinNativeEventFilter::getColorizationColor();
     }
 }
 
