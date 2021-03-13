@@ -56,6 +56,7 @@ void QtAcrylicEffectHelper::install(const QWindow *window)
         connect(m_window, &QWindow::xChanged, this, &QtAcrylicEffectHelper::needsRepaint);
         connect(m_window, &QWindow::yChanged, this, &QtAcrylicEffectHelper::needsRepaint);
         connect(m_window, &QWindow::activeChanged, this, &QtAcrylicEffectHelper::needsRepaint);
+        // What's the difference between "visibility" and "window state"?
         //connect(m_window, &QWindow::visibilityChanged, this, &QtAcrylicEffectHelper::needsRepaint);
         connect(m_window, &QWindow::windowStateChanged, this, &QtAcrylicEffectHelper::needsRepaint);
 #ifdef Q_OS_WINDOWS
@@ -176,6 +177,11 @@ void QtAcrylicEffectHelper::paintWindowBackground(QPainter *painter, const QRegi
     if (!checkWindow()) {
         return;
     }
+    // TODO: should we limit it to Win32 only? Or should we do something about the
+    // acrylic brush instead?
+    if (Utilities::disableExtraProcessingForBlur()) {
+        return;
+    }
     painter->save();
     painter->setClipRegion(clip);
     paintBackground(painter, clip.boundingRect());
@@ -189,6 +195,11 @@ void QtAcrylicEffectHelper::paintWindowBackground(QPainter *painter, const QRect
         return;
     }
     if (!checkWindow()) {
+        return;
+    }
+    // TODO: should we limit it to Win32 only? Or should we do something about the
+    // acrylic brush instead?
+    if (Utilities::disableExtraProcessingForBlur()) {
         return;
     }
     painter->save();

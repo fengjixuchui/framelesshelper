@@ -34,7 +34,7 @@
 #include <QtCore/qsettings.h>
 #include <QtCore/qlibrary.h>
 #include <QtCore/qt_windows.h>
-#include <QtCore/qcoreapplication.h>
+#include <QtGui/qguiapplication.h>
 #include <QtCore/qdebug.h>
 #include <dwmapi.h>
 #include <QtGui/qpa/qplatformwindow.h>
@@ -85,8 +85,9 @@ using ACCENT_STATE = enum _ACCENT_STATE
     ACCENT_ENABLE_GRADIENT = 1,
     ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
     ACCENT_ENABLE_BLURBEHIND = 3,
-    ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,
-    ACCENT_INVALID_STATE = 5
+    ACCENT_ENABLE_ACRYLICBLURBEHIND = 4, // RS4 1803
+    ACCENT_ENABLE_HOSTBACKDROP = 5, // RS5 1809
+    ACCENT_INVALID_STATE = 6
 };
 
 using ACCENT_POLICY = struct _ACCENT_POLICY
@@ -291,8 +292,12 @@ bool Utilities::setBlurEffectEnabled(const QWindow *window, const bool enabled, 
     if (!window) {
         return false;
     }
-    bool result = false;
     const auto hwnd = reinterpret_cast<HWND>(window->winId());
+    Q_ASSERT(hwnd);
+    if (!hwnd) {
+        return false;
+    }
+    bool result = false;
     // We prefer DwmEnableBlurBehindWindow on Windows 7.
     if (isWin8OrGreater() && win32Data()->SetWindowCompositionAttributePFN) {
         ACCENT_POLICY accentPolicy;
@@ -339,6 +344,11 @@ bool Utilities::setBlurEffectEnabled(const QWindow *window, const bool enabled, 
             qWarning() << "DwmEnableBlurBehindWindow failed.";
         }
     }
+    if (result) {
+        const auto win = const_cast<QWindow *>(window);
+        win->setProperty(_flh_global::_flh_acrylic_blurEnabled_flag, enabled);
+        win->setProperty(_flh_global::_flh_acrylic_gradientColor_flag, gradientColor);
+    }
     return result;
 }
 
@@ -349,8 +359,7 @@ bool Utilities::isColorizationEnabled()
     }
     bool ok = false;
     const QSettings registry(g_dwmRegistryKey, QSettings::NativeFormat);
-    const bool colorPrevalence
-        = registry.value(QStringLiteral("ColorPrevalence"), 0).toULongLong(&ok) != 0;
+    const bool colorPrevalence = registry.value(QStringLiteral("ColorPrevalence"), 0).toULongLong(&ok) != 0;
     return (ok && colorPrevalence);
 }
 
@@ -372,7 +381,22 @@ bool Utilities::isLightThemeEnabled()
 
 bool Utilities::isDarkThemeEnabled()
 {
-    return win32Data()->ShouldSystemUseDarkModePFN ? win32Data()->ShouldSystemUseDarkModePFN() : false;
+    if (!isWin10OrGreater()) {
+        return false;
+    }
+    // We can't use ShouldAppsUseDarkMode due to the following reason:
+    // it's not exported publicly so we can only load it dynamically through its ordinal name,
+    // however, its ordinal name has changed in some unknown system versions so we can't find
+    // the actually function now. But ShouldSystemUseDarkMode is not affected, we can still
+    // use it in the latest version of Windows.
+    if (win32Data()->ShouldSystemUseDarkModePFN) {
+        return win32Data()->ShouldSystemUseDarkModePFN();
+    }
+    // Read the registry directly if Win32 APIs are not available.
+    bool ok = false;
+    const QSettings settings(g_personalizeRegistryKey, QSettings::NativeFormat);
+    const bool lightThemeEnabled = settings.value(QStringLiteral("AppsUseLightTheme"), 0).toULongLong(&ok) != 0;
+    return (ok && !lightThemeEnabled);
 }
 
 bool Utilities::isHighContrastModeEnabled()
@@ -397,6 +421,10 @@ bool Utilities::isDarkFrameEnabled(const QWindow *window)
         return false;
     }
     const auto hwnd = reinterpret_cast<HWND>(window->winId());
+    Q_ASSERT(hwnd);
+    if (!hwnd) {
+        return false;
+    }
     BOOL result = FALSE;
     const bool ok = SUCCEEDED(DwmGetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, &result, sizeof(result)))
                     || SUCCEEDED(DwmGetWindowAttribute(hwnd, DwmwaUseImmersiveDarkModeBefore20h1, &result, sizeof(result)));
@@ -410,9 +438,8 @@ bool Utilities::isTransparencyEffectEnabled()
     }
     bool ok = false;
     const QSettings registry(g_personalizeRegistryKey, QSettings::NativeFormat);
-    const bool enableTransparency
-        = registry.value(QStringLiteral("EnableTransparency"), 0).toULongLong(&ok) != 0;
-    return (ok && enableTransparency);
+    const bool transparencyEnabled = registry.value(QStringLiteral("EnableTransparency"), 0).toULongLong(&ok) != 0;
+    return (ok && transparencyEnabled);
 }
 
 void Utilities::triggerFrameChange(const QWindow *window)
@@ -421,8 +448,12 @@ void Utilities::triggerFrameChange(const QWindow *window)
     if (!window) {
         return;
     }
-    if (SetWindowPos(reinterpret_cast<HWND>(window->winId()), nullptr, 0, 0, 0, 0,
-            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOOWNERZORDER) == FALSE) {
+    const auto hwnd = reinterpret_cast<HWND>(window->winId());
+    Q_ASSERT(hwnd);
+    if (!hwnd) {
+        return;
+    }
+    if (SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOOWNERZORDER) == FALSE) {
         qWarning() << "SetWindowPos failed.";
     }
 }
@@ -433,8 +464,13 @@ void Utilities::updateFrameMargins(const QWindow *window, const bool reset)
     if (!window) {
         return;
     }
+    const auto hwnd = reinterpret_cast<HWND>(window->winId());
+    Q_ASSERT(hwnd);
+    if (!hwnd) {
+        return;
+    }
     const MARGINS margins = reset ? MARGINS{0, 0, 0, 0} : MARGINS{1, 1, 1, 1};
-    if (FAILED(DwmExtendFrameIntoClientArea(reinterpret_cast<HWND>(window->winId()), &margins))) {
+    if (FAILED(DwmExtendFrameIntoClientArea(hwnd, &margins))) {
         qWarning() << "DwmExtendFrameIntoClientArea failed.";
     }
 }
@@ -626,16 +662,6 @@ bool Utilities::isWin10OrGreater(const int subVer)
 #endif
 }
 
-static inline bool forceEnableDwmBlur()
-{
-    return qEnvironmentVariableIsSet(_flh_global::_flh_acrylic_forceEnableTraditionalBlur_flag);
-}
-
-static inline bool forceDisableWallpaperBlur()
-{
-    return qEnvironmentVariableIsSet(_flh_global::_flh_acrylic_forceDisableWallpaperBlur_flag);
-}
-
 static inline bool forceEnableOfficialMSWin10AcrylicBlur()
 {
     return qEnvironmentVariableIsSet(_flh_global::_flh_acrylic_forceEnableOfficialMSWin10AcrylicBlur_flag);
@@ -660,7 +686,7 @@ bool Utilities::isOfficialMSWin10AcrylicBlurAvailable()
     if (!isWin10OrGreater()) {
         return false;
     }
-    if (!forceEnableDwmBlur() && !forceDisableWallpaperBlur()) {
+    if (!forceEnableTraditionalBlur() && !forceDisableWallpaperBlur() && !disableExtraProcessingForBlur()) {
         // We can't enable the official Acrylic blur in wallpaper blur mode.
         return false;
     }
@@ -682,7 +708,7 @@ static inline bool shouldUseOriginalDwmBlur()
 
 bool Utilities::shouldUseTraditionalBlur()
 {
-    if ((forceEnableDwmBlur() || forceDisableWallpaperBlur()) && shouldUseOriginalDwmBlur()) {
+    if ((forceEnableTraditionalBlur() || forceDisableWallpaperBlur() || disableExtraProcessingForBlur()) && shouldUseOriginalDwmBlur()) {
         return true;
     }
     return false;

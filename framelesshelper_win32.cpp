@@ -74,14 +74,9 @@
 #define GET_Y_LPARAM(lp) ((int) (short) HIWORD(lp))
 #endif
 
-static inline bool shouldUseNativeTitleBar()
-{
-    return qEnvironmentVariableIsSet(_flh_global::_flh_useNativeTitleBar_flag);
-}
-
 static inline bool shouldHaveWindowFrame()
 {
-    if (shouldUseNativeTitleBar()) {
+    if (Utilities::shouldUseNativeTitleBar()) {
         // We have to use the original window frame unconditionally if we
         // want to use the native title bar.
         return true;
@@ -286,7 +281,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
         // preserve the four window borders. So we just remove the whole
         // window frame, otherwise the code will become much more complex.
 
-        if (shouldUseNativeTitleBar()) {
+        if (Utilities::shouldUseNativeTitleBar()) {
             break;
         }
 
@@ -543,7 +538,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
         // another branch, if you are interested in it, you can give it a
         // try.
 
-        if (shouldUseNativeTitleBar()) {
+        if (Utilities::shouldUseNativeTitleBar()) {
             break;
         }
 
@@ -593,7 +588,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
         POINT winLocalMouse = {qRound(globalMouse.x()), qRound(globalMouse.y())};
         ScreenToClient(msg->hwnd, &winLocalMouse);
         const QPointF localMouse = {static_cast<qreal>(winLocalMouse.x), static_cast<qreal>(winLocalMouse.y)};
-        const bool isInIgnoreObjects = isInSpecificObjects(globalMouse, qvariant_cast<QObjectList>(window->property(_flh_global::_flh_ignoredObjects_flag)), dpr);
+        const bool isInIgnoreObjects = isInSpecificObjects(globalMouse, getIgnoredObjects(window), dpr);
         const int bh = getSystemMetric(window, Utilities::SystemMetric::BorderHeight, true);
         const int tbh = getSystemMetric(window, Utilities::SystemMetric::TitleBarHeight, true);
         const bool isTitleBar = (localMouse.y() <= tbh) && !isInIgnoreObjects;
@@ -636,8 +631,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
                     return HTCLIENT;
                 }
                 const bool isBottom = (localMouse.y() >= (wh - bh));
-                // Make the border a little wider to let the user easy to resize
-                // on corners.
+                // Make the border a little wider to let the user easy to resize on corners.
                 const int factor = (isTop || isBottom) ? 2 : 1;
                 const bool isLeft = (localMouse.x() <= (bw * factor));
                 const bool isRight = (localMouse.x() >= (ww - (bw * factor)));
@@ -691,7 +685,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
     }
     case WM_SETICON:
     case WM_SETTEXT: {
-        if (shouldUseNativeTitleBar()) {
+        if (Utilities::shouldUseNativeTitleBar()) {
             break;
         }
 
@@ -711,6 +705,38 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
     default:
         break;
     }
+#if 0
+    // TODO: what if the user want to use the wallpaper blur all the time?
+    // Add an option to let the user choose what he wants.
+    if (Utilities::isWin10OrGreater()) {
+        if (window->property(_flh_global::_flh_acrylic_blurEnabled_flag).toBool()) {
+            bool shouldSwitchBlurMode = false;
+            if (msg->message == WM_ENTERSIZEMOVE) {
+                shouldSwitchBlurMode = true;
+                // Switch to the wallpaper blur temporarily due to the following issue:
+                // the window will become **VERY** laggy when it's being moved or resized.
+                // It's known as a bug of the API itself, currently no one knows how to fix it.
+                qunsetenv(_flh_global::_flh_acrylic_forceDisableWallpaperBlur_flag);
+                qunsetenv(_flh_global::_flh_acrylic_forceEnableTraditionalBlur_flag);
+                qunsetenv(_flh_global::_flh_acrylic_forceEnableOfficialMSWin10AcrylicBlur_flag);
+            }
+            if (msg->message == WM_EXITSIZEMOVE) {
+                shouldSwitchBlurMode = true;
+                // Switch back to the official Acrylic blur. That undocumented API won't cause any issues
+                // if we don't move or resize the window.
+                qputenv(_flh_global::_flh_acrylic_forceEnableTraditionalBlur_flag, "True");
+                qputenv(_flh_global::_flh_acrylic_forceDisableWallpaperBlur_flag, "True");
+                qputenv(_flh_global::_flh_acrylic_forceEnableOfficialMSWin10AcrylicBlur_flag, "True");
+            }
+            if (shouldSwitchBlurMode) {
+                const auto gradientColor = qvariant_cast<QColor>(window->property(_flh_global::_flh_acrylic_gradientColor_flag));
+                if (!Utilities::setBlurEffectEnabled(window, true, gradientColor)) {
+                    qWarning() << "Failed to enable the blur effect.";
+                }
+            }
+        }
+    }
+#endif
     return false;
 }
 
