@@ -27,10 +27,13 @@
 #include <QtGui/qscreen.h>
 #include <QtGui/qpainter.h>
 #include <QtGui/private/qmemrotate_p.h>
+#include <QtCore/qdebug.h>
 
 /*
  * Copied from https://code.qt.io/cgit/qt/qtbase.git/tree/src/widgets/effects/qpixmapfilter.cpp
  * With minor modifications, most of them are format changes.
+ * They are exported functions of Qt, we can make use of them directly, but they are in the QtWidgets
+ * module, I don't want our library have such a dependency.
  */
 
 #ifndef AVG
@@ -162,6 +165,8 @@ static inline void expblur(QImage &img, const qreal radius, const bool improvedQ
             qt_blurrow<aprec, zprec, alphaOnly>(img, row, alpha);
         }
     }
+    // TODO: QImage(int width, int height, QImage::Format format)
+    // Why the argument order is inverted here? The application will crash if change it back.
     QImage temp(img.height(), img.width(), img.format());
     temp.setDevicePixelRatio(img.devicePixelRatio());
     if (transposed >= 0) {
@@ -327,6 +332,8 @@ void Utilities::blurImage(QImage &blurImage, const qreal radius, const bool qual
 /*
  * Copied from https://code.qt.io/cgit/qt/qtbase.git/tree/src/widgets/styles/qstyle.cpp
  * With minor modifications, most of them are format changes.
+ * They are exported functions of Qt, we can make use of them directly, but they are in the QtWidgets
+ * module, I don't want our library have such a dependency.
  */
 
 static inline Qt::Alignment visualAlignment(const Qt::LayoutDirection direction, const Qt::Alignment alignment)
@@ -373,8 +380,14 @@ QWindow *Utilities::findWindow(const WId winId)
     return nullptr;
 }
 
-QRect Utilities::getScreenAvailableGeometry()
+QRect Utilities::getScreenAvailableGeometry(const QWindow *window)
 {
+    if (window) {
+        const QScreen *screen = window->screen();
+        if (screen) {
+            return screen->availableGeometry();
+        }
+    }
     return QGuiApplication::primaryScreen()->availableGeometry();
 }
 
@@ -401,4 +414,104 @@ bool Utilities::forceDisableWallpaperBlur()
 bool Utilities::shouldUseNativeTitleBar()
 {
     return qEnvironmentVariableIsSet(_flh_global::_flh_useNativeTitleBar_flag);
+}
+
+bool Utilities::isWindowFixedSize(const QWindow *window)
+{
+    Q_ASSERT(window);
+    if (!window) {
+        return false;
+    }
+#ifdef Q_OS_WINDOWS
+    if (window->flags().testFlag(Qt::MSWindowsFixedSizeDialogHint)) {
+        return true;
+    }
+#endif
+    const QSize minSize = window->minimumSize();
+    const QSize maxSize = window->maximumSize();
+    if (!minSize.isEmpty() && !maxSize.isEmpty() && (minSize == maxSize)) {
+        return true;
+    }
+    return false;
+}
+
+bool Utilities::isMouseInSpecificObjects(const QPointF &mousePos, const QObjectList &objects, const qreal dpr)
+{
+    if (mousePos.isNull()) {
+        qWarning() << "Mouse position point is null.";
+        return false;
+    }
+    if (objects.isEmpty()) {
+        qWarning() << "Object list is empty.";
+        return false;
+    }
+    for (auto &&object : qAsConst(objects)) {
+        if (!object) {
+            qWarning() << "Object pointer is null.";
+            continue;
+        }
+        if (!object->isWidgetType() && !object->inherits("QQuickItem")) {
+            qWarning() << object << "is not a QWidget or QQuickItem!";
+            continue;
+        }
+        if (!object->property("visible").toBool()) {
+            qDebug() << "Skipping invisible object" << object;
+            continue;
+        }
+        const auto mapOriginPointToWindow = [](const QObject *obj) -> QPointF {
+            Q_ASSERT(obj);
+            if (!obj) {
+                return {};
+            }
+            QPointF point = {obj->property("x").toReal(), obj->property("y").toReal()};
+            for (QObject *parent = obj->parent(); parent; parent = parent->parent()) {
+                point += {parent->property("x").toReal(), parent->property("y").toReal()};
+                if (parent->isWindowType()) {
+                    break;
+                }
+            }
+            return point;
+        };
+        const QPointF originPoint = mapOriginPointToWindow(object);
+        const qreal width = object->property("width").toReal();
+        const qreal height = object->property("height").toReal();
+        const QRectF rect = {originPoint.x() * dpr, originPoint.y() * dpr, width * dpr, height * dpr};
+        if (rect.contains(mousePos)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QRect Utilities::getScreenAvailableGeometry(const QPoint &pos)
+{
+    if (!pos.isNull()) {
+        const QScreen *screen = QGuiApplication::screenAt(pos);
+        if (screen) {
+            return screen->availableGeometry();
+        }
+    }
+    return QGuiApplication::primaryScreen()->availableGeometry();
+}
+
+QRect Utilities::getScreenGeometry(const QWindow *window)
+{
+    if (window) {
+        const QScreen *screen = window->screen();
+        if (screen) {
+            return screen->geometry();
+        }
+    }
+    return QGuiApplication::primaryScreen()->geometry();
+}
+
+QRect Utilities::getScreenGeometry(const QPoint &pos)
+{
+    if (!pos.isNull()) {
+        const QScreen *screen = QGuiApplication::screenAt(pos);
+        if (screen) {
+            return screen->geometry();
+        }
+    }
+    return QGuiApplication::primaryScreen()->geometry();
 }

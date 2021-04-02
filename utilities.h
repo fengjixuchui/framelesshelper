@@ -41,9 +41,10 @@ enum class DesktopWallpaperAspectStyle
 {
     Central,
     Tiled,
-    IgnoreRatio,
-    KeepRatio,
-    KeepRatioByExpanding
+    IgnoreRatioFit, // Stretch
+    KeepRatioFit, // Fit
+    KeepRatioByExpanding, // Fill
+    Span
 };
 
 // Common
@@ -59,9 +60,14 @@ FRAMELESSHELPER_EXPORT bool isDarkThemeEnabled();
 FRAMELESSHELPER_EXPORT QWindow *findWindow(const WId winId);
 
 FRAMELESSHELPER_EXPORT QImage getDesktopWallpaperImage(const int screen = -1);
+FRAMELESSHELPER_EXPORT QColor getDesktopBackgroundColor(const int screen = -1);
 FRAMELESSHELPER_EXPORT DesktopWallpaperAspectStyle getDesktopWallpaperAspectStyle(const int screen = -1);
 
-FRAMELESSHELPER_EXPORT QRect getScreenAvailableGeometry();
+FRAMELESSHELPER_EXPORT QRect getScreenAvailableGeometry(const QWindow *window);
+FRAMELESSHELPER_EXPORT QRect getScreenAvailableGeometry(const QPoint &pos);
+
+FRAMELESSHELPER_EXPORT QRect getScreenGeometry(const QWindow *window);
+FRAMELESSHELPER_EXPORT QRect getScreenGeometry(const QPoint &pos);
 
 FRAMELESSHELPER_EXPORT QRect alignedRect(const Qt::LayoutDirection direction, const Qt::Alignment alignment, const QSize &size, const QRect &rectangle);
 
@@ -72,6 +78,10 @@ FRAMELESSHELPER_EXPORT bool disableExtraProcessingForBlur();
 FRAMELESSHELPER_EXPORT bool forceEnableTraditionalBlur();
 FRAMELESSHELPER_EXPORT bool forceDisableWallpaperBlur();
 FRAMELESSHELPER_EXPORT bool shouldUseNativeTitleBar();
+
+FRAMELESSHELPER_EXPORT bool isWindowFixedSize(const QWindow *window);
+
+FRAMELESSHELPER_EXPORT bool isMouseInSpecificObjects(const QPointF &mousePos, const QObjectList &objects, const qreal dpr = 1.0);
 
 #ifdef Q_OS_WINDOWS
 // Windows specific
@@ -98,6 +108,8 @@ FRAMELESSHELPER_EXPORT void updateQtFrameMargins(QWindow *window, const bool ena
 FRAMELESSHELPER_EXPORT quint32 getWindowDpi(const QWindow *window);
 FRAMELESSHELPER_EXPORT QMargins getWindowNativeFrameMargins(const QWindow *window);
 FRAMELESSHELPER_EXPORT QColor getNativeWindowFrameColor(const bool isActive = true);
+
+FRAMELESSHELPER_EXPORT void displaySystemMenu(const QWindow *window, const QPoint &pos = {});
 #endif
 
 }

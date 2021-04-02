@@ -56,6 +56,8 @@ if(TARGET Qt${QT_VERSION_MAJOR}::Widgets)
     list(APPEND SOURCES
         qtacrylicwidget.h
         qtacrylicwidget.cpp
+        qtacrylicmainwindow.h
+        qtacrylicmainwindow.cpp
     )
 endif()
 
@@ -81,6 +83,11 @@ else()
         framelesshelper.h
         framelesshelper.cpp
     )
+    if(MACOS)
+        list(APPEND SOURCES utilities_macos.mm)
+    else()
+        list(APPEND SOURCES utilities_linux.cpp)
+    endif()
 endif()
 
 if(WIN32 AND BUILD_SHARED_LIBS)

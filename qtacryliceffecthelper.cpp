@@ -29,7 +29,7 @@
 #include <QtGui/qwindow.h>
 #include <QtCore/qcoreapplication.h>
 
-QtAcrylicEffectHelper::QtAcrylicEffectHelper()
+QtAcrylicEffectHelper::QtAcrylicEffectHelper(QObject *parent) : QObject(parent)
 {
     Q_INIT_RESOURCE(qtacrylichelper);
     QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
@@ -44,6 +44,8 @@ QtAcrylicEffectHelper::QtAcrylicEffectHelper()
     m_frameColor = Qt::black;
 #endif
 }
+
+QtAcrylicEffectHelper::~QtAcrylicEffectHelper() = default;
 
 void QtAcrylicEffectHelper::install(const QWindow *window)
 {
@@ -85,6 +87,11 @@ void QtAcrylicEffectHelper::clearWallpaper()
     if (!m_bluredWallpaper.isNull()) {
         m_bluredWallpaper = {};
     }
+}
+
+void QtAcrylicEffectHelper::showWarning() const
+{
+    qDebug() << "The Acrylic blur effect has been enabled. Rendering acrylic material surfaces is highly GPU-intensive, which can slow down the application, increase the power consumption on the devices on which the application is running.";
 }
 
 QBrush QtAcrylicEffectHelper::getAcrylicBrush() const
@@ -165,8 +172,6 @@ void QtAcrylicEffectHelper::setFrameThickness(const qreal value)
     }
 }
 
-QtAcrylicEffectHelper::~QtAcrylicEffectHelper() = default;
-
 void QtAcrylicEffectHelper::paintWindowBackground(QPainter *painter, const QRegion &clip)
 {
     Q_ASSERT(painter);
@@ -177,14 +182,10 @@ void QtAcrylicEffectHelper::paintWindowBackground(QPainter *painter, const QRegi
     if (!checkWindow()) {
         return;
     }
-    // TODO: should we limit it to Win32 only? Or should we do something about the
-    // acrylic brush instead?
-    if (Utilities::disableExtraProcessingForBlur()) {
-        return;
-    }
     painter->save();
     painter->setClipRegion(clip);
     paintBackground(painter, clip.boundingRect());
+    painter->restore();
 }
 
 void QtAcrylicEffectHelper::paintWindowBackground(QPainter *painter, const QRect &rect)
@@ -197,14 +198,10 @@ void QtAcrylicEffectHelper::paintWindowBackground(QPainter *painter, const QRect
     if (!checkWindow()) {
         return;
     }
-    // TODO: should we limit it to Win32 only? Or should we do something about the
-    // acrylic brush instead?
-    if (Utilities::disableExtraProcessingForBlur()) {
-        return;
-    }
     painter->save();
     painter->setClipRegion({rect});
     paintBackground(painter, rect);
+    painter->restore();
 }
 
 void QtAcrylicEffectHelper::paintBackground(QPainter *painter, const QRect &rect)
@@ -215,6 +212,11 @@ void QtAcrylicEffectHelper::paintBackground(QPainter *painter, const QRect &rect
         return;
     }
     if (!checkWindow()) {
+        return;
+    }
+    // TODO: should we limit it to Win32 only? Or should we do something about the
+    // acrylic brush instead?
+    if (Utilities::disableExtraProcessingForBlur()) {
         return;
     }
     if (Utilities::shouldUseTraditionalBlur()) {
@@ -230,7 +232,6 @@ void QtAcrylicEffectHelper::paintBackground(QPainter *painter, const QRect &rect
     painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
     painter->setOpacity(1);
     painter->fillRect(rect, m_acrylicBrush);
-    painter->restore();
 }
 
 void QtAcrylicEffectHelper::paintWindowFrame(QPainter *painter, const QRect &rect)
@@ -249,13 +250,19 @@ void QtAcrylicEffectHelper::paintWindowFrame(QPainter *painter, const QRect &rec
     const int width = rect.isValid() ? rect.width() : m_window->width();
     const int height = rect.isValid() ? rect.height() : m_window->height();
 #if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
-    const QList<QLineF> lines = {
+    using BorderLines = QList<QLineF>;
 #else
-    const QVector<QLineF> lines = {
+    using BorderLines = QVector<QLineF>;
 #endif
+#ifdef Q_OS_WINDOWS
+    const int internalFix = 1;
+#else
+    const int internalFix = 0;
+#endif
+    const BorderLines lines = {
         {0, 0, static_cast<qreal>(width), 0},
         {width - m_frameThickness, 0, width - m_frameThickness, static_cast<qreal>(height)},
-        {static_cast<qreal>(width), height - m_frameThickness, 0, height - m_frameThickness},
+        {static_cast<qreal>(width), height - m_frameThickness - internalFix, 0, height - m_frameThickness - internalFix},
         {0, static_cast<qreal>(height), 0, 0}
     };
     const bool active = m_window->isActive();
@@ -298,10 +305,13 @@ void QtAcrylicEffectHelper::updateAcrylicBrush(const QColor &alternativeTintColo
 
 void QtAcrylicEffectHelper::updateBehindWindowBackground()
 {
+    if (!checkWindow()) {
+        return;
+    }
     if (!m_bluredWallpaper.isNull()) {
         return;
     }
-    const QSize size = Utilities::getScreenAvailableGeometry().size();
+    const QSize size = Utilities::getScreenGeometry(m_window).size();
     m_bluredWallpaper = QPixmap(size);
     m_bluredWallpaper.fill(Qt::transparent);
     QImage image = Utilities::getDesktopWallpaperImage();
@@ -312,18 +322,21 @@ void QtAcrylicEffectHelper::updateBehindWindowBackground()
     const Utilities::DesktopWallpaperAspectStyle aspectStyle = Utilities::getDesktopWallpaperAspectStyle();
     QImage buffer(size, QImage::Format_ARGB32_Premultiplied);
 #ifdef Q_OS_WINDOWS
-    if (aspectStyle == Utilities::DesktopWallpaperAspectStyle::Central) {
-        buffer.fill(Qt::black);
+    if ((aspectStyle == Utilities::DesktopWallpaperAspectStyle::Central) ||
+            (aspectStyle == Utilities::DesktopWallpaperAspectStyle::KeepRatioFit)) {
+        buffer.fill(Utilities::getDesktopBackgroundColor());
     }
 #endif
-    if (aspectStyle == Utilities::DesktopWallpaperAspectStyle::IgnoreRatio ||
-            aspectStyle == Utilities::DesktopWallpaperAspectStyle::KeepRatio ||
+    if (aspectStyle == Utilities::DesktopWallpaperAspectStyle::IgnoreRatioFit ||
+            aspectStyle == Utilities::DesktopWallpaperAspectStyle::KeepRatioFit ||
             aspectStyle == Utilities::DesktopWallpaperAspectStyle::KeepRatioByExpanding) {
-        Qt::AspectRatioMode mode = Qt::KeepAspectRatioByExpanding;
-        if (aspectStyle == Utilities::DesktopWallpaperAspectStyle::IgnoreRatio) {
+        Qt::AspectRatioMode mode;
+        if (aspectStyle == Utilities::DesktopWallpaperAspectStyle::IgnoreRatioFit) {
             mode = Qt::IgnoreAspectRatio;
-        } else if (aspectStyle == Utilities::DesktopWallpaperAspectStyle::KeepRatio) {
+        } else if (aspectStyle == Utilities::DesktopWallpaperAspectStyle::KeepRatioFit) {
             mode = Qt::KeepAspectRatio;
+        } else {
+            mode = Qt::KeepAspectRatioByExpanding;
         }
         QSize newSize = image.size();
         newSize.scale(size, mode);

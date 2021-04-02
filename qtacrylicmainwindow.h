@@ -25,13 +25,13 @@
 #pragma once
 
 #include "framelesshelper_global.h"
-#include <QtWidgets/qwidget.h>
+#include <QtWidgets/qmainwindow.h>
 #include "qtacryliceffecthelper.h"
 
-class FRAMELESSHELPER_EXPORT QtAcrylicWidget : public QWidget
+class FRAMELESSHELPER_EXPORT QtAcrylicMainWindow : public QMainWindow
 {
     Q_OBJECT
-    Q_DISABLE_COPY_MOVE(QtAcrylicWidget)
+    Q_DISABLE_COPY_MOVE(QtAcrylicMainWindow)
     Q_PROPERTY(QColor tintColor READ tintColor WRITE setTintColor NOTIFY tintColorChanged)
     Q_PROPERTY(qreal tintOpacity READ tintOpacity WRITE setTintOpacity NOTIFY tintOpacityChanged)
     Q_PROPERTY(qreal noiseOpacity READ noiseOpacity WRITE setNoiseOpacity NOTIFY noiseOpacityChanged)
@@ -41,8 +41,8 @@ class FRAMELESSHELPER_EXPORT QtAcrylicWidget : public QWidget
     Q_PROPERTY(bool acrylicEnabled READ acrylicEnabled WRITE setAcrylicEnabled NOTIFY acrylicEnabledChanged)
 
 public:
-    explicit QtAcrylicWidget(QWidget *parent = nullptr);
-    ~QtAcrylicWidget() override;
+    explicit QtAcrylicMainWindow(QWidget *parent = nullptr, Qt::WindowFlags flags = {});
+    ~QtAcrylicMainWindow() override;
 
     QColor tintColor() const;
     void setTintColor(const QColor &value);
@@ -65,6 +65,9 @@ public:
     bool acrylicEnabled() const;
     void setAcrylicEnabled(const bool value);
 
+public Q_SLOTS:
+    void displaySystemMenu();
+
 Q_SIGNALS:
     void tintColorChanged();
     void tintOpacityChanged();
@@ -73,10 +76,15 @@ Q_SIGNALS:
     void frameColorChanged();
     void frameThicknessChanged();
     void acrylicEnabledChanged();
+    void windowStateChanged();
 
 protected:
     void showEvent(QShowEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
+    void changeEvent(QEvent *event) override;
+
+private:
+    void updateContentMargin();
 
 private:
     QtAcrylicEffectHelper m_acrylicHelper;

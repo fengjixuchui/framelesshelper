@@ -22,19 +22,19 @@
  * SOFTWARE.
  */
 
-#include "qtacrylicwidget.h"
+#include "qtacrylicmainwindow.h"
 #include "utilities.h"
 #include <QtCore/qdebug.h>
 #include <QtGui/qevent.h>
 #include <QtGui/qpainter.h>
 
-QtAcrylicWidget::QtAcrylicWidget(QWidget *parent) : QWidget(parent)
+QtAcrylicMainWindow::QtAcrylicMainWindow(QWidget *parent, Qt::WindowFlags flags) : QMainWindow(parent, flags)
 {
 }
 
-QtAcrylicWidget::~QtAcrylicWidget() = default;
+QtAcrylicMainWindow::~QtAcrylicMainWindow() = default;
 
-QColor QtAcrylicWidget::tintColor() const
+QColor QtAcrylicMainWindow::tintColor() const
 {
     const QColor color = m_acrylicHelper.getTintColor();
     if (color.isValid() && (color != Qt::transparent)) {
@@ -44,7 +44,7 @@ QColor QtAcrylicWidget::tintColor() const
     }
 }
 
-void QtAcrylicWidget::setTintColor(const QColor &value)
+void QtAcrylicMainWindow::setTintColor(const QColor &value)
 {
     if (!value.isValid()) {
         qWarning() << "Tint color not valid.";
@@ -61,12 +61,12 @@ void QtAcrylicWidget::setTintColor(const QColor &value)
     }
 }
 
-qreal QtAcrylicWidget::tintOpacity() const
+qreal QtAcrylicMainWindow::tintOpacity() const
 {
     return m_acrylicHelper.getTintOpacity();
 }
 
-void QtAcrylicWidget::setTintOpacity(const qreal value)
+void QtAcrylicMainWindow::setTintOpacity(const qreal value)
 {
     if (m_acrylicHelper.getTintOpacity() != value) {
         m_acrylicHelper.setTintOpacity(value);
@@ -76,12 +76,12 @@ void QtAcrylicWidget::setTintOpacity(const qreal value)
     }
 }
 
-qreal QtAcrylicWidget::noiseOpacity() const
+qreal QtAcrylicMainWindow::noiseOpacity() const
 {
     return m_acrylicHelper.getNoiseOpacity();
 }
 
-void QtAcrylicWidget::setNoiseOpacity(const qreal value)
+void QtAcrylicMainWindow::setNoiseOpacity(const qreal value)
 {
     if (m_acrylicHelper.getNoiseOpacity() != value) {
         m_acrylicHelper.setNoiseOpacity(value);
@@ -91,12 +91,12 @@ void QtAcrylicWidget::setNoiseOpacity(const qreal value)
     }
 }
 
-bool QtAcrylicWidget::frameVisible() const
+bool QtAcrylicMainWindow::frameVisible() const
 {
     return m_frameVisible;
 }
 
-void QtAcrylicWidget::setFrameVisible(const bool value)
+void QtAcrylicMainWindow::setFrameVisible(const bool value)
 {
     if (m_frameVisible != value) {
         m_frameVisible = value;
@@ -105,12 +105,12 @@ void QtAcrylicWidget::setFrameVisible(const bool value)
     }
 }
 
-QColor QtAcrylicWidget::frameColor() const
+QColor QtAcrylicMainWindow::frameColor() const
 {
     return m_acrylicHelper.getFrameColor();
 }
 
-void QtAcrylicWidget::setFrameColor(const QColor &value)
+void QtAcrylicMainWindow::setFrameColor(const QColor &value)
 {
     if (m_acrylicHelper.getFrameColor() != value) {
         m_acrylicHelper.setFrameColor(value);
@@ -119,12 +119,12 @@ void QtAcrylicWidget::setFrameColor(const QColor &value)
     }
 }
 
-qreal QtAcrylicWidget::frameThickness() const
+qreal QtAcrylicMainWindow::frameThickness() const
 {
     return m_acrylicHelper.getFrameThickness();
 }
 
-void QtAcrylicWidget::setFrameThickness(const qreal value)
+void QtAcrylicMainWindow::setFrameThickness(const qreal value)
 {
     if (m_acrylicHelper.getFrameThickness() != value) {
         m_acrylicHelper.setFrameThickness(value);
@@ -133,12 +133,12 @@ void QtAcrylicWidget::setFrameThickness(const qreal value)
     }
 }
 
-bool QtAcrylicWidget::acrylicEnabled() const
+bool QtAcrylicMainWindow::acrylicEnabled() const
 {
     return m_acrylicEnabled;
 }
 
-void QtAcrylicWidget::setAcrylicEnabled(const bool value)
+void QtAcrylicMainWindow::setAcrylicEnabled(const bool value)
 {
     if (m_acrylicEnabled != value) {
         m_acrylicEnabled = value;
@@ -157,19 +157,27 @@ void QtAcrylicWidget::setAcrylicEnabled(const bool value)
     }
 }
 
-void QtAcrylicWidget::showEvent(QShowEvent *event)
+void QtAcrylicMainWindow::showEvent(QShowEvent *event)
 {
-    QWidget::showEvent(event);
+    QMainWindow::showEvent(event);
+    updateContentMargin();
     if (!m_inited) {
         m_acrylicHelper.install(windowHandle());
         m_acrylicHelper.updateAcrylicBrush(tintColor());
-        connect(&m_acrylicHelper, &QtAcrylicEffectHelper::needsRepaint, this, qOverload<>(&QtAcrylicWidget::update));
+        connect(&m_acrylicHelper, &QtAcrylicEffectHelper::needsRepaint, this, qOverload<>(&QtAcrylicMainWindow::update));
         Utilities::setBlurEffectEnabled(windowHandle(), m_acrylicEnabled);
         m_inited = true;
     }
 }
 
-void QtAcrylicWidget::paintEvent(QPaintEvent *event)
+void QtAcrylicMainWindow::updateContentMargin()
+{
+    const qreal margin = (isMaximized() || isFullScreen()) ? 0.0 : (1.0 / devicePixelRatioF());
+    const int m = qRound(margin);
+    setContentsMargins(m, m, m, m);
+}
+
+void QtAcrylicMainWindow::paintEvent(QPaintEvent *event)
 {
     QPainter painter(this);
     const QRect rect = {0, 0, width(), height()};
@@ -179,5 +187,21 @@ void QtAcrylicWidget::paintEvent(QPaintEvent *event)
     if (frameVisible()) {
         m_acrylicHelper.paintWindowFrame(&painter, rect);
     }
-    QWidget::paintEvent(event);
+    QMainWindow::paintEvent(event);
+}
+
+void QtAcrylicMainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange) {
+        updateContentMargin();
+        Q_EMIT windowStateChanged();
+    }
+}
+
+void QtAcrylicMainWindow::displaySystemMenu()
+{
+#ifdef Q_OS_WINDOWS
+    Utilities::displaySystemMenu(windowHandle());
+#endif
 }

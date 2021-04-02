@@ -106,7 +106,7 @@ static inline void setup()
 {
     if (g_instance.isNull()) {
         g_instance.reset(new FramelessHelperWin);
-        qApp->installNativeEventFilter(g_instance.get());
+        qApp->installNativeEventFilter(g_instance.data());
     }
 }
 
@@ -127,7 +127,7 @@ FramelessHelperWin::FramelessHelperWin() = default;
 FramelessHelperWin::~FramelessHelperWin()
 {
     if (!g_instance.isNull()) {
-        qApp->removeNativeEventFilter(g_instance.get());
+        qApp->removeNativeEventFilter(g_instance.data());
     }
 }
 
@@ -289,7 +289,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
             *result = 0;
             return true;
         }
-        bool nonclient = false;
+        bool nonClientAreaExists = false;
         const auto clientRect = &(reinterpret_cast<LPNCCALCSIZE_PARAMS>(msg->lParam)->rgrc[0]);
         if (shouldHaveWindowFrame()) {
             // Store the original top before the default window proc
@@ -308,7 +308,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
         // We don't need this correction when we're fullscreen. We will
         // have the WS_POPUP size, so we don't have to worry about
         // borders, and the default frame will be fine.
-        if (IsMaximized(msg->hwnd) && !(window->windowState() & Qt::WindowFullScreen)) {
+        if (IsMaximized(msg->hwnd) && (window->windowState() != Qt::WindowFullScreen)) {
             // Windows automatically adds a standard width border to all
             // sides when a window is maximized. We have to remove it
             // otherwise the content of our window will be cut-off from
@@ -324,7 +324,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
                 clientRect->left += bw;
                 clientRect->right -= bw;
             }
-            nonclient = true;
+            nonClientAreaExists = true;
         }
         // Attempt to detect if there's an autohide taskbar, and if
         // there is, reduce our size a bit on the side with the taskbar,
@@ -399,19 +399,26 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
                 if (top) {
                     // Peculiarly, when we're fullscreen,
                     clientRect->top += kAutoHideTaskbarThicknessPy;
-                    nonclient = true;
+                    nonClientAreaExists = true;
                 } else if (bottom) {
                     clientRect->bottom -= kAutoHideTaskbarThicknessPy;
-                    nonclient = true;
+                    nonClientAreaExists = true;
                 } else if (left) {
                     clientRect->left += kAutoHideTaskbarThicknessPx;
-                    nonclient = true;
+                    nonClientAreaExists = true;
                 } else if (right) {
                     clientRect->right -= kAutoHideTaskbarThicknessPx;
-                    nonclient = true;
+                    nonClientAreaExists = true;
                 }
             }
         }
+        // Fix the flickering issue while resizing.
+        // "clientRect->right += 1;" also works.
+        // The only draw back of this small trick is it will affect
+        // Qt's coordinate system. It makes the "canvas" of the window
+        // larger than it should be. Be careful if you need to paint
+        // something manually either through QPainter or Qt Quick.
+        clientRect->bottom += 1;
         // If the window bounds change, we're going to relayout and repaint
         // anyway. Returning WVR_REDRAW avoids an extra paint before that of
         // the old client pixels in the (now wrong) location, and thus makes
@@ -422,7 +429,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
         // Windows exhibits bugs where client pixels and child HWNDs are
         // mispositioned by the width/height of the upper-left nonclient
         // area.
-        *result = nonclient ? 0 : WVR_REDRAW;
+        *result = nonClientAreaExists ? 0 : WVR_REDRAW;
         return true;
     }
     // These undocumented messages are sent to draw themed window
@@ -542,53 +549,12 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
             break;
         }
 
-        const auto isInSpecificObjects =
-            [](const QPointF &mousePos, const QObjectList &objects, const qreal dpr) -> bool {
-            if (objects.isEmpty()) {
-                return false;
-            }
-            for (auto &&object : qAsConst(objects)) {
-                if (!object) {
-                    continue;
-                }
-                if (!object->isWidgetType() && !object->inherits("QQuickItem")) {
-                    qWarning() << object << "is not a QWidget or QQuickItem!";
-                    continue;
-                }
-                if (!object->property("visible").toBool()) {
-                    qDebug() << "Skipping invisible object" << object;
-                    continue;
-                }
-                const auto mapOriginPointToWindow = [](const QObject *obj) -> QPointF {
-                    Q_ASSERT(obj);
-                    if (!obj) {
-                        return {};
-                    }
-                    QPointF point = {obj->property("x").toReal(), obj->property("y").toReal()};
-                    for (QObject *parent = obj->parent(); parent; parent = parent->parent()) {
-                        point += {parent->property("x").toReal(), parent->property("y").toReal()};
-                        if (parent->isWindowType()) {
-                            break;
-                        }
-                    }
-                    return point;
-                };
-                const QPointF originPoint = mapOriginPointToWindow(object);
-                const qreal width = object->property("width").toReal();
-                const qreal height = object->property("height").toReal();
-                if (QRectF(originPoint.x() * dpr, originPoint.y() * dpr, width * dpr, height * dpr)
-                        .contains(mousePos)) {
-                    return true;
-                }
-            }
-            return false;
-        };
         const qreal dpr = window->devicePixelRatio();
         const QPointF globalMouse = QCursor::pos(window->screen()) * dpr;
         POINT winLocalMouse = {qRound(globalMouse.x()), qRound(globalMouse.y())};
         ScreenToClient(msg->hwnd, &winLocalMouse);
         const QPointF localMouse = {static_cast<qreal>(winLocalMouse.x), static_cast<qreal>(winLocalMouse.y)};
-        const bool isInIgnoreObjects = isInSpecificObjects(globalMouse, getIgnoredObjects(window), dpr);
+        const bool isInIgnoreObjects = Utilities::isMouseInSpecificObjects(globalMouse, getIgnoredObjects(window), dpr);
         const int bh = getSystemMetric(window, Utilities::SystemMetric::BorderHeight, true);
         const int tbh = getSystemMetric(window, Utilities::SystemMetric::TitleBarHeight, true);
         const bool isTitleBar = (localMouse.y() <= tbh) && !isInIgnoreObjects;
@@ -635,17 +601,7 @@ bool FramelessHelperWin::nativeEventFilter(const QByteArray &eventType, void *me
                 const int factor = (isTop || isBottom) ? 2 : 1;
                 const bool isLeft = (localMouse.x() <= (bw * factor));
                 const bool isRight = (localMouse.x() >= (ww - (bw * factor)));
-                const bool fixedSize = [window] {
-                    if (window->flags().testFlag(Qt::MSWindowsFixedSizeDialogHint)) {
-                        return true;
-                    }
-                    const QSize minSize = window->minimumSize();
-                    const QSize maxSize = window->maximumSize();
-                    if (!minSize.isEmpty() && !maxSize.isEmpty() && minSize == maxSize) {
-                        return true;
-                    }
-                    return false;
-                }();
+                const bool fixedSize = Utilities::isWindowFixedSize(window);
                 const auto getBorderValue = [fixedSize](int value) -> int {
                     // HTBORDER: non-resizable window border.
                     return fixedSize ? HTBORDER : value;

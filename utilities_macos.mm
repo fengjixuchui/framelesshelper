@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2020 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,26 +22,4 @@
  * SOFTWARE.
  */
 
-import QtQuick 2.9
-import QtQuick.Controls 2.9
-
-Button {
-    id: button
-
-    implicitWidth: 45
-    implicitHeight: 30
-
-    ToolTip.visible: hovered && !down
-    ToolTip.delay: Qt.styleHints.mousePressAndHoldInterval
-    ToolTip.text: qsTr("Minimize")
-
-    contentItem: Image {
-        anchors.fill: parent
-        source: "qrc:/images/button_minimize_black.svg"
-    }
-
-    background: Rectangle {
-        visible: button.down || button.hovered
-        color: button.down ? "#808080" : (button.hovered ? "#c7c7c7" : "transparent")
-    }
-}
+#include "utilities.h"

@@ -36,7 +36,11 @@
 #include <QtCore/qt_windows.h>
 #include <QtGui/qguiapplication.h>
 #include <QtCore/qdebug.h>
+#include <QtCore/qfileinfo.h>
 #include <dwmapi.h>
+#include <shobjidl_core.h>
+#include <wininet.h>
+#include <shlobj_core.h>
 #include <QtGui/qpa/qplatformwindow.h>
 #if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
 #include <QtGui/qpa/qplatformnativeinterface.h>
@@ -47,6 +51,9 @@
 #include <QtCore/qoperatingsystemversion.h>
 #else
 #include <QtCore/qsysinfo.h>
+#endif
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 12, 0))
+#include <QtCore/qscopeguard.h>
 #endif
 
 Q_DECLARE_METATYPE(QMargins)
@@ -115,6 +122,7 @@ using PREFERRED_APP_MODE = enum _PREFERRED_APP_MODE
 
 static const QString g_dwmRegistryKey = QStringLiteral(R"(HKEY_CURRENT_USER\Software\Microsoft\Windows\DWM)");
 static const QString g_personalizeRegistryKey = QStringLiteral(R"(HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize)");
+static const QString g_desktopRegistryKey = QStringLiteral(R"(HKEY_CURRENT_USER\Control Panel\Desktop)");
 
 // The standard values of border width, border height and title bar height when DPI is 96.
 static const int g_defaultBorderWidth = 8, g_defaultBorderHeight = 8, g_defaultTitleBarHeight = 31;
@@ -212,7 +220,7 @@ bool Utilities::isDwmBlurAvailable()
         qWarning() << "DwmIsCompositionEnabled failed.";
         return false;
     }
-    return isWin7OrGreater() && (enabled == TRUE);
+    return isWin7OrGreater() && (enabled != FALSE);
 }
 
 int Utilities::getSystemMetric(const QWindow *window, const SystemMetric metric, const bool dpiAware, const bool forceSystemValue)
@@ -330,7 +338,7 @@ bool Utilities::setBlurEffectEnabled(const QWindow *window, const bool enabled, 
         } else {
             accentPolicy.AccentState = ACCENT_DISABLED;
         }
-        result = win32Data()->SetWindowCompositionAttributePFN(hwnd, &wcaData) == TRUE;
+        result = (win32Data()->SetWindowCompositionAttributePFN(hwnd, &wcaData) != FALSE);
         if (!result) {
             qWarning() << "SetWindowCompositionAttribute failed.";
         }
@@ -357,6 +365,7 @@ bool Utilities::isColorizationEnabled()
     if (!isWin10OrGreater()) {
         return false;
     }
+    // TODO: Is there an official Win32 API to do this?
     bool ok = false;
     const QSettings registry(g_dwmRegistryKey, QSettings::NativeFormat);
     const bool colorPrevalence = registry.value(QStringLiteral("ColorPrevalence"), 0).toULongLong(&ok) != 0;
@@ -367,11 +376,14 @@ QColor Utilities::getColorizationColor()
 {
     DWORD color = 0;
     BOOL opaqueBlend = FALSE;
-    if (FAILED(DwmGetColorizationColor(&color, &opaqueBlend))) {
-        qWarning() << "DwmGetColorizationColor failed.";
-        return Qt::darkGray;
+    if (SUCCEEDED(DwmGetColorizationColor(&color, &opaqueBlend))) {
+        return QColor::fromRgba(color);
     }
-    return QColor::fromRgba(color);
+    qWarning() << "DwmGetColorizationColor failed, reading from the registry instead.";
+    bool ok = false;
+    const QSettings settings(g_dwmRegistryKey, QSettings::NativeFormat);
+    const DWORD value = settings.value(QStringLiteral("ColorizationColor"), 0).toULongLong(&ok);
+    return ok ? QColor::fromRgba(value) : Qt::darkGray;
 }
 
 bool Utilities::isLightThemeEnabled()
@@ -387,12 +399,12 @@ bool Utilities::isDarkThemeEnabled()
     // We can't use ShouldAppsUseDarkMode due to the following reason:
     // it's not exported publicly so we can only load it dynamically through its ordinal name,
     // however, its ordinal name has changed in some unknown system versions so we can't find
-    // the actually function now. But ShouldSystemUseDarkMode is not affected, we can still
+    // the actual function now. But ShouldSystemUseDarkMode is not affected, we can still
     // use it in the latest version of Windows.
     if (win32Data()->ShouldSystemUseDarkModePFN) {
         return win32Data()->ShouldSystemUseDarkModePFN();
     }
-    // Read the registry directly if Win32 APIs are not available.
+    qDebug() << "ShouldSystemUseDarkMode() not available, reading from the registry instead.";
     bool ok = false;
     const QSettings settings(g_personalizeRegistryKey, QSettings::NativeFormat);
     const bool lightThemeEnabled = settings.value(QStringLiteral("AppsUseLightTheme"), 0).toULongLong(&ok) != 0;
@@ -436,6 +448,7 @@ bool Utilities::isTransparencyEffectEnabled()
     if (!isWin10OrGreater()) {
         return false;
     }
+    // TODO: Is there an official Win32 API to do this?
     bool ok = false;
     const QSettings registry(g_personalizeRegistryKey, QSettings::NativeFormat);
     const bool transparencyEnabled = registry.value(QStringLiteral("EnableTransparency"), 0).toULongLong(&ok) != 0;
@@ -477,34 +490,238 @@ void Utilities::updateFrameMargins(const QWindow *window, const bool reset)
 
 QImage Utilities::getDesktopWallpaperImage(const int screen)
 {
-    Q_UNUSED(screen);
-    WCHAR path[MAX_PATH];
-    if (SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, path, 0) == FALSE) {
-        qWarning() << "SystemParametersInfoW failed.";
-        return {};
+    if (isWin8OrGreater()) {
+        if (SUCCEEDED(CoInitialize(nullptr))) {
+            IDesktopWallpaper* pDesktopWallpaper = nullptr;
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 12, 0))
+            const auto cleanup = qScopeGuard([pDesktopWallpaper](){
+                if (pDesktopWallpaper) {
+                    pDesktopWallpaper->Release();
+                }
+                CoUninitialize();
+            });
+#endif
+            // TODO: Why CLSCTX_INPROC_SERVER failed?
+            if (SUCCEEDED(CoCreateInstance(CLSID_DesktopWallpaper, nullptr, CLSCTX_LOCAL_SERVER, IID_IDesktopWallpaper, reinterpret_cast<void **>(&pDesktopWallpaper))) && pDesktopWallpaper) {
+                UINT monitorCount = 0;
+                if (SUCCEEDED(pDesktopWallpaper->GetMonitorDevicePathCount(&monitorCount))) {
+                    if (screen > int(monitorCount - 1)) {
+                        qWarning() << "Screen number above total screen count.";
+                        return {};
+                    }
+                    const UINT monitorIndex = qMax(screen, 0);
+                    LPWSTR monitorId = nullptr;
+                    if (SUCCEEDED(pDesktopWallpaper->GetMonitorDevicePathAt(monitorIndex, &monitorId)) && monitorId) {
+                        LPWSTR wallpaperPath = nullptr;
+                        if (SUCCEEDED(pDesktopWallpaper->GetWallpaper(monitorId, &wallpaperPath)) && wallpaperPath) {
+                            CoTaskMemFree(monitorId);
+                            const QString _path = QString::fromWCharArray(wallpaperPath);
+                            CoTaskMemFree(wallpaperPath);
+                            return QImage(_path);
+                        } else {
+                            CoTaskMemFree(monitorId);
+                            qWarning() << "IDesktopWallpaper::GetWallpaper() failed.";
+                        }
+                    } else {
+                        qWarning() << "IDesktopWallpaper::GetMonitorDevicePathAt() failed";
+                    }
+                } else {
+                    qWarning() << "IDesktopWallpaper::GetMonitorDevicePathCount() failed";
+                }
+            } else {
+                qWarning() << "Failed to create COM instance - DesktopWallpaper.";
+            }
+        } else {
+            qWarning() << "Failed to initialize COM.";
+        }
+        qDebug() << "The IDesktopWallpaper interface failed. Trying the IActiveDesktop interface instead.";
     }
-    return QImage(QString::fromWCharArray(path));
+    if (SUCCEEDED(CoInitialize(nullptr))) {
+        IActiveDesktop *pActiveDesktop = nullptr;
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 12, 0))
+        const auto cleanup = qScopeGuard([pActiveDesktop](){
+            if (pActiveDesktop) {
+                pActiveDesktop->Release();
+            }
+            CoUninitialize();
+        });
+#endif
+        if (SUCCEEDED(CoCreateInstance(CLSID_ActiveDesktop, nullptr, CLSCTX_INPROC_SERVER, IID_IActiveDesktop, reinterpret_cast<void **>(&pActiveDesktop))) && pActiveDesktop) {
+            const auto wallpaperPath = new WCHAR[MAX_PATH];
+            // TODO: AD_GETWP_BMP, AD_GETWP_IMAGE, AD_GETWP_LAST_APPLIED. What's the difference?
+            if (SUCCEEDED(pActiveDesktop->GetWallpaper(wallpaperPath, MAX_PATH, AD_GETWP_LAST_APPLIED))) {
+                const QString _path = QString::fromWCharArray(wallpaperPath);
+                delete [] wallpaperPath;
+                return QImage(_path);
+            } else {
+                qWarning() << "IActiveDesktop::GetWallpaper() failed.";
+            }
+        } else {
+            qWarning() << "Failed to create COM instance - ActiveDesktop.";
+        }
+    } else {
+        qWarning() << "Failed to initialize COM.";
+    }
+    qDebug() << "Shell API failed. Using SystemParametersInfoW instead.";
+    const auto wallpaperPath = new WCHAR[MAX_PATH];
+    if (SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wallpaperPath, 0) != FALSE) {
+        const QString _path = QString::fromWCharArray(wallpaperPath);
+        delete [] wallpaperPath;
+        return QImage(_path);
+    }
+    qWarning() << "SystemParametersInfoW failed. Reading from the registry instead.";
+    const QSettings settings(g_desktopRegistryKey, QSettings::NativeFormat);
+    const QString path = settings.value(QStringLiteral("WallPaper")).toString();
+    if (QFileInfo::exists(path)) {
+        return QImage(path);
+    }
+    qWarning() << "Failed to read the registry.";
+    return {};
+}
+
+QColor Utilities::getDesktopBackgroundColor(const int screen)
+{
+    Q_UNUSED(screen);
+    if (isWin8OrGreater()) {
+        if (SUCCEEDED(CoInitialize(nullptr))) {
+            IDesktopWallpaper *pDesktopWallpaper = nullptr;
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 12, 0))
+            const auto cleanup = qScopeGuard([pDesktopWallpaper]() {
+                if (pDesktopWallpaper) {
+                    pDesktopWallpaper->Release();
+                }
+                CoUninitialize();
+            });
+#endif
+            // TODO: Why CLSCTX_INPROC_SERVER failed?
+            if (SUCCEEDED(CoCreateInstance(CLSID_DesktopWallpaper, nullptr, CLSCTX_LOCAL_SERVER, IID_IDesktopWallpaper, reinterpret_cast<void **>(&pDesktopWallpaper))) && pDesktopWallpaper) {
+                COLORREF color = 0;
+                if (SUCCEEDED(pDesktopWallpaper->GetBackgroundColor(&color))) {
+                    return QColor::fromRgba(color);
+                } else {
+                    qWarning() << "IDesktopWallpaper::GetBackgroundColor() failed.";
+                }
+            } else {
+                qWarning() << "Failed to create COM instance - DesktopWallpaper.";
+            }
+        } else {
+            qWarning() << "Failed to initialize COM.";
+        }
+        qDebug() << "The IDesktopWallpaper interface failed.";
+    }
+    // TODO: Is there any other way to get the background color? Traditional Win32 API? Registry?
+    // Is there a Shell API for Win7?
+    return Qt::black;
 }
 
 Utilities::DesktopWallpaperAspectStyle Utilities::getDesktopWallpaperAspectStyle(const int screen)
 {
     Q_UNUSED(screen);
-    const QSettings settings(QStringLiteral(R"(HKEY_CURRENT_USER\Control Panel\Desktop)"), QSettings::NativeFormat);
-    const DWORD style = settings.value(QStringLiteral("WallpaperStyle")).toULongLong();
+    if (isWin8OrGreater()) {
+        if (SUCCEEDED(CoInitialize(nullptr))) {
+            IDesktopWallpaper *pDesktopWallpaper = nullptr;
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 12, 0))
+            const auto cleanup = qScopeGuard([pDesktopWallpaper](){
+                if (pDesktopWallpaper) {
+                    pDesktopWallpaper->Release();
+                }
+                CoUninitialize();
+            });
+#endif
+            // TODO: Why CLSCTX_INPROC_SERVER failed?
+            if (SUCCEEDED(CoCreateInstance(CLSID_DesktopWallpaper, nullptr, CLSCTX_LOCAL_SERVER, IID_IDesktopWallpaper, reinterpret_cast<void **>(&pDesktopWallpaper))) && pDesktopWallpaper) {
+                DESKTOP_WALLPAPER_POSITION position = DWPOS_FILL;
+                if (SUCCEEDED(pDesktopWallpaper->GetPosition(&position))) {
+                    switch (position) {
+                    case DWPOS_CENTER:
+                        return DesktopWallpaperAspectStyle::Central;
+                    case DWPOS_TILE:
+                        return DesktopWallpaperAspectStyle::Tiled;
+                    case DWPOS_STRETCH:
+                        return DesktopWallpaperAspectStyle::IgnoreRatioFit;
+                    case DWPOS_FIT:
+                        return DesktopWallpaperAspectStyle::KeepRatioFit;
+                    case DWPOS_FILL:
+                        return DesktopWallpaperAspectStyle::KeepRatioByExpanding;
+                    case DWPOS_SPAN:
+                        return DesktopWallpaperAspectStyle::Span;
+                    }
+                } else {
+                    qWarning() << "IDesktopWallpaper::GetPosition() failed.";
+                }
+            } else {
+                qWarning() << "Failed to create COM instance - DesktopWallpaper.";
+            }
+        } else {
+            qWarning() << "Failed to initialize COM.";
+        }
+        qDebug() << "The IDesktopWallpaper interface failed. Trying the IActiveDesktop interface instead.";
+    }
+    if (SUCCEEDED(CoInitialize(nullptr))) {
+        IActiveDesktop *pActiveDesktop = nullptr;
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 12, 0))
+        const auto cleanup = qScopeGuard([pActiveDesktop](){
+            if (pActiveDesktop) {
+                pActiveDesktop->Release();
+            }
+            CoUninitialize();
+        });
+#endif
+        if (SUCCEEDED(CoCreateInstance(CLSID_ActiveDesktop, nullptr, CLSCTX_INPROC_SERVER, IID_IActiveDesktop, reinterpret_cast<void **>(&pActiveDesktop))) && pActiveDesktop) {
+            WALLPAPEROPT opt;
+            SecureZeroMemory(&opt, sizeof(opt));
+            opt.dwSize = sizeof(opt);
+            if (SUCCEEDED(pActiveDesktop->GetWallpaperOptions(&opt, 0))) {
+                switch (opt.dwStyle) {
+                case WPSTYLE_CENTER:
+                    return DesktopWallpaperAspectStyle::Central;
+                case WPSTYLE_TILE:
+                    return DesktopWallpaperAspectStyle::Tiled;
+                case WPSTYLE_STRETCH:
+                    return DesktopWallpaperAspectStyle::IgnoreRatioFit;
+                case WPSTYLE_KEEPASPECT:
+                    return DesktopWallpaperAspectStyle::KeepRatioFit;
+                case WPSTYLE_CROPTOFIT:
+                    return DesktopWallpaperAspectStyle::KeepRatioByExpanding;
+                case WPSTYLE_SPAN:
+                    return DesktopWallpaperAspectStyle::Span;
+                }
+            } else {
+                qWarning() << "IActiveDesktop::GetWallpaperOptions() failed.";
+            }
+        } else {
+            qWarning() << "Failed to create COM instance - ActiveDesktop.";
+        }
+    } else {
+        qWarning() << "Failed to initialize COM.";
+    }
+    qDebug() << "Shell API failed. Reading from the registry instead.";
+    const QSettings settings(g_desktopRegistryKey, QSettings::NativeFormat);
+    bool ok = false;
+    const DWORD style = settings.value(QStringLiteral("WallpaperStyle"), 0).toULongLong(&ok);
+    if (!ok) {
+        qWarning() << "Failed to read the registry.";
+        return DesktopWallpaperAspectStyle::KeepRatioByExpanding; // Fill
+    }
     switch (style) {
     case 0: {
-        if (settings.value(QStringLiteral("TileWallpaper")).toBool()) {
+        bool ok = false;
+        if ((settings.value(QStringLiteral("TileWallpaper"), 0).toULongLong(&ok) != 0) && ok) {
             return DesktopWallpaperAspectStyle::Tiled;
         } else {
             return DesktopWallpaperAspectStyle::Central;
         }
     }
     case 2:
-        return DesktopWallpaperAspectStyle::IgnoreRatio;
+        return DesktopWallpaperAspectStyle::IgnoreRatioFit;
     case 6:
-        return DesktopWallpaperAspectStyle::KeepRatio;
-    default:
+        return DesktopWallpaperAspectStyle::KeepRatioFit;
+    case 10:
         return DesktopWallpaperAspectStyle::KeepRatioByExpanding;
+    case 22:
+        return DesktopWallpaperAspectStyle::Span;
+    default:
+        return DesktopWallpaperAspectStyle::KeepRatioByExpanding; // Fill
     }
 }
 
@@ -541,7 +758,8 @@ quint32 Utilities::getWindowDpi(const QWindow *window)
             qWarning() << "MonitorFromWindow failed.";
         }
     }
-    // Using Direct2D to get DPI is deprecated.
+    // We can use Direct2D to get DPI since Win7 or Vista, but it's marked as deprecated by Microsoft
+    // in the latest SDK and we'll get compilation warnings because of that, so we just don't use it here.
     const HDC hdc = GetDC(nullptr);
     if (hdc) {
         const int dpiX = GetDeviceCaps(hdc, LOGPIXELSX);
@@ -599,7 +817,9 @@ void Utilities::updateQtFrameMargins(QWindow *window, const bool enable)
         return;
     }
     const int tbh = enable ? Utilities::getSystemMetric(window, Utilities::SystemMetric::TitleBarHeight, true, true) : 0;
-    const QMargins margins = {0, -tbh, 0, 0};
+    const int bw = enable ? Utilities::getSystemMetric(window, Utilities::SystemMetric::BorderWidth, true, true) : 0;
+    const int bh = enable ? Utilities::getSystemMetric(window, Utilities::SystemMetric::BorderHeight, true, true) : 0;
+    const QMargins margins = {-bw, -tbh, -bw, -bh}; // left, top, right, bottom
     const QVariant marginsVar = QVariant::fromValue(margins);
     window->setProperty("_q_windowsCustomMargins", marginsVar);
 #if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
@@ -712,4 +932,69 @@ bool Utilities::shouldUseTraditionalBlur()
         return true;
     }
     return false;
+}
+
+void Utilities::displaySystemMenu(const QWindow *window, const QPoint &pos)
+{
+    Q_ASSERT(window);
+    if (!window) {
+        return;
+    }
+    const auto hwnd = reinterpret_cast<HWND>(window->winId());
+    Q_ASSERT(hwnd);
+    if (!hwnd) {
+        return;
+    }
+    const HMENU hMenu = GetSystemMenu(hwnd, FALSE);
+    if (!hMenu) {
+        qWarning() << "Failed to acquire the system menu.";
+        return;
+    }
+    MENUITEMINFOW mii;
+    SecureZeroMemory(&mii, sizeof(mii));
+    mii.cbSize = sizeof(mii);
+    mii.fMask = MIIM_STATE;
+    mii.fType = 0;
+    mii.fState = MF_ENABLED;
+    SetMenuItemInfoW(hMenu, SC_RESTORE, FALSE, &mii);
+    SetMenuItemInfoW(hMenu, SC_SIZE, FALSE, &mii);
+    SetMenuItemInfoW(hMenu, SC_MOVE, FALSE, &mii);
+    SetMenuItemInfoW(hMenu, SC_MAXIMIZE, FALSE, &mii);
+    SetMenuItemInfoW(hMenu, SC_MINIMIZE, FALSE, &mii);
+    mii.fState = MF_GRAYED;
+    const bool isMin = [window]{
+        return (window->windowState() == Qt::WindowMinimized);
+    }();
+    const bool isMax = [window]{
+        return (window->windowState() == Qt::WindowMaximized);
+    }();
+    const bool isFull = [window]{
+        return (window->windowState() == Qt::WindowFullScreen);
+    }();
+    const bool isNormal = [window]{
+        return (window->windowState() == Qt::WindowNoState);
+    }();
+    const bool isFix = isWindowFixedSize(window);
+    if (isFix || isMax || isFull) {
+        SetMenuItemInfoW(hMenu, SC_SIZE, FALSE, &mii);
+        SetMenuItemInfoW(hMenu, SC_MAXIMIZE, FALSE, &mii);
+    }
+    if (isFix || isFull || isNormal) {
+        SetMenuItemInfoW(hMenu, SC_RESTORE, FALSE, &mii);
+    }
+    if (isMax || isFull) {
+        SetMenuItemInfoW(hMenu, SC_MOVE, FALSE, &mii);
+    }
+    if (isMin) {
+        SetMenuItemInfoW(hMenu, SC_MINIMIZE, FALSE, &mii);
+    }
+    const bool isRtl = QGuiApplication::isRightToLeft();
+    const QPoint point = pos.isNull() ? QCursor::pos(window->screen()) : window->mapToGlobal(pos);
+    const LPARAM cmd = TrackPopupMenu(hMenu,
+            (TPM_LEFTBUTTON | TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_TOPALIGN |
+            (isRtl ? TPM_RIGHTALIGN : TPM_LEFTALIGN)),
+            point.x(), point.y(), 0, hwnd, nullptr);
+    if (cmd) {
+        PostMessageW(hwnd, WM_SYSCOMMAND, cmd, 0);
+    }
 }

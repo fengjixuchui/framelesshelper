@@ -24,8 +24,12 @@ SOURCES += \
     qtacryliceffecthelper.cpp
 qtHaveModule(widgets) {
     QT += widgets
-    HEADERS += qtacrylicwidget.h
-    SOURCES += qtacrylicwidget.cpp
+    HEADERS += \
+        qtacrylicwidget.h \
+        qtacrylicmainwindow.h
+    SOURCES += \
+        qtacrylicwidget.cpp \
+        qtacrylicmainwindow.cpp
 }
 qtHaveModule(quick) {
     QT += quick
@@ -50,6 +54,6 @@ win32 {
         utilities_win32.cpp \
         framelesshelper_win32.cpp \
         qtacryliceffecthelper_win32.cpp
-    LIBS += -luser32 -lshell32 -lgdi32 -ldwmapi
+    LIBS += -luser32 -lshell32 -lgdi32 -ldwmapi -lole32
     RC_FILE = framelesshelper.rc
 }
